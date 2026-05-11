@@ -1,45 +1,14 @@
 "use client";
 
-import {
-  useAccount,
-  useConnect,
-  useDisconnect,
-} from "wagmi";
+import dynamic from "next/dynamic";
 
-import { useMounted } from "@/hooks/use-mounted";
-
-export default function ConnectButton() {
-  const mounted = useMounted();
-
-  const { address, isConnected } = useAccount();
-
-  const { connect, connectors } = useConnect();
-
-  const { disconnect } = useDisconnect();
-
-  if (!mounted) {
-    return null;
+const WalletClient = dynamic(
+  () => import("./wallet-client"),
+  {
+    ssr: false,
   }
+);
 
-  const connector = connectors[0];
-
-  if (isConnected) {
-    return (
-      <button
-        onClick={() => disconnect()}
-        className="rounded-lg border px-4 py-2"
-      >
-        Disconnect {address?.slice(0, 6)}...
-      </button>
-    );
-  }
-
-  return (
-    <button
-      onClick={() => connect({ connector })}
-      className="rounded-lg border px-4 py-2"
-    >
-      Connect Wallet
-    </button>
-  );
+export default function WalletButton() {
+  return <WalletClient />;
 }

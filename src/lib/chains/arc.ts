@@ -5,15 +5,19 @@ export const arc = defineChain({
 
   name: "Arc",
 
+  network: "arc",
+
   nativeCurrency: {
-    name: "USDC",
-    symbol: "USDC",
-    decimals: 6,
+    name: "Ethereum",
+    symbol: "ETH",
+    decimals: 18,
   },
 
   rpcUrls: {
     default: {
-      http: [process.env.NEXT_PUBLIC_ARC_RPC_URL || ""],
+      http: [
+        process.env.NEXT_PUBLIC_ARC_RPC_URL || "",
+      ],
     },
   },
 
@@ -23,4 +27,6 @@ export const arc = defineChain({
       url: "https://testnet.arcscan.app/",
     },
   },
+
+  testnet: true,
 });

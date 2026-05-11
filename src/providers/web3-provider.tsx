@@ -2,7 +2,14 @@
 
 import { ReactNode } from "react";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
+
+import {
+  RainbowKitProvider,
+} from "@rainbow-me/rainbowkit";
 
 import { WagmiProvider } from "wagmi";
 
@@ -14,11 +21,15 @@ interface Props {
   children: ReactNode;
 }
 
-export default function Web3Provider({ children }: Props) {
+export default function Web3Provider({
+  children,
+}: Props) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        {children}
+        <RainbowKitProvider>
+          {children}
+        </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );
