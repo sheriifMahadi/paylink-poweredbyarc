@@ -17,6 +17,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.75.0",
+    "sanitize-html": "^2.17.3",
     "sonner": "^2.0.7",
     "viem": "^2.21.53",
     "wagmi": "^2.12.0",
