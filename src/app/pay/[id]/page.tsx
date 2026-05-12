@@ -69,6 +69,9 @@ export default function PayPage() {
   const [paying, setPaying] =
     useState(false);
 
+  const [cancelling, setCancelling] =
+    useState(false);
+
   const [timeLeft, setTimeLeft] =
     useState("");
 
@@ -214,6 +217,60 @@ export default function PayPage() {
       clearInterval(interval);
   }, [request]);
 
+  // HANDLE CANCEL
+  const handleCancel = async () => {
+    if (!request) return;
+
+    try {
+      setCancelling(true);
+
+      // ONLY PENDING CAN CANCEL
+      if (
+        request.status !== "pending"
+      ) {
+        toast.error(
+          "Cannot cancel resolved request"
+        );
+
+        return;
+      }
+
+      const { error } =
+        await supabase
+          .from("payment_requests")
+          .update({
+            status: "cancelled",
+          })
+          .eq("id", request.id)
+          .eq("status", "pending");
+
+      if (error) {
+        toast.error(
+          "Failed to cancel request"
+        );
+
+        return;
+      }
+
+      setRequest({
+        ...request,
+        status: "cancelled",
+      });
+
+      toast.success(
+        "Payment request cancelled"
+      );
+    } catch (err) {
+      console.error(err);
+
+      toast.error(
+        "Cancellation failed"
+      );
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   // PAYMENT ENGINE
   const handlePay = async () => {
     if (!request || !address)
@@ -222,15 +279,38 @@ export default function PayPage() {
     try {
       setPaying(true);
 
-      // ALLOW SELF PAYMENTS
-      // intentionally no self-wallet restriction
+      // HARD LOCK AGAINST DOUBLE PAY
+      const {
+        data: freshRequest,
+        error: freshError,
+      } = await supabase
+        .from("payment_requests")
+        .select("*")
+        .eq("id", request.id)
+        .single();
 
-      // PREVENT DUPLICATE PAYMENTS
       if (
-        request.status !== "pending"
+        freshError ||
+        !freshRequest
       ) {
         toast.error(
-          "Payment already resolved"
+          "Failed to verify payment request"
+        );
+
+        return;
+      }
+
+      // PREVENT DOUBLE PAYMENT
+      if (
+        freshRequest.status !==
+        "pending"
+      ) {
+        toast.error(
+          `Request already ${freshRequest.status}`
+        );
+
+        setRequest(
+          freshRequest as PaymentRequest
         );
 
         return;
@@ -238,9 +318,9 @@ export default function PayPage() {
 
       // EXPIRED CHECK
       if (
-        request.expires_at &&
+        freshRequest.expires_at &&
         new Date(
-          request.expires_at
+          freshRequest.expires_at
         ).getTime() < Date.now()
       ) {
         toast.error(
@@ -252,7 +332,7 @@ export default function PayPage() {
           .update({
             status: "expired",
           })
-          .eq("id", request.id);
+          .eq("id", freshRequest.id);
 
         return;
       }
@@ -268,7 +348,9 @@ export default function PayPage() {
       if (
         balance &&
         Number(balance.formatted) <
-          Number(request.amount)
+          Number(
+            freshRequest.amount
+          )
       ) {
         toast.error(
           "Insufficient USDC balance"
@@ -277,13 +359,35 @@ export default function PayPage() {
         return;
       }
 
-      // SET PROCESSING STATE
-      await supabase
+      // PROCESSING LOCK
+      const {
+        data: lockedRows,
+        error: lockError,
+      } = await supabase
         .from("payment_requests")
         .update({
           status: "processing",
         })
-        .eq("id", request.id);
+        .eq("id", freshRequest.id)
+        .eq("status", "pending")
+        .select();
+
+      if (
+        lockError ||
+        !lockedRows ||
+        lockedRows.length === 0
+      ) {
+        toast.error(
+          "Request already being processed"
+        );
+
+        return;
+      }
+
+      setRequest({
+        ...freshRequest,
+        status: "processing",
+      });
 
       // SEND TRANSACTION
       const txHash =
@@ -297,11 +401,12 @@ export default function PayPage() {
           functionName: "transfer",
 
           args: [
-            request.recipient_wallet as `0x${string}`,
+            freshRequest.recipient_wallet as `0x${string}`,
+
             BigInt(
               Math.floor(
                 Number(
-                  request.amount
+                  freshRequest.amount
                 ) * 1_000_000
               )
             ),
@@ -320,7 +425,7 @@ export default function PayPage() {
         }
       );
 
-      // UPDATE DATABASE
+      // FINALIZE PAYMENT
       await supabase
         .from("payment_requests")
         .update({
@@ -333,23 +438,45 @@ export default function PayPage() {
           paid_at:
             new Date().toISOString(),
         })
-        .eq("id", request.id);
+        .eq("id", freshRequest.id);
 
       toast.success(
         "Payment completed"
       );
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
 
-      // FAILED STATE
-      await supabase
-        .from("payment_requests")
-        .update({
-          status: "failed",
-        })
-        .eq("id", request?.id);
+      // BETTER FAILURE HANDLING
+      const message =
+        err?.shortMessage ||
+        err?.message ||
+        "";
 
-      toast.error("Payment failed");
+      // USER REJECTED TX
+      if (
+        message
+          .toLowerCase()
+          .includes("rejected")
+      ) {
+        toast.error(
+          "Transaction rejected"
+        );
+      } else {
+        toast.error(
+          "Payment failed"
+        );
+      }
+
+      // REVERT PROCESSING -> PENDING
+      if (request?.id) {
+        await supabase
+          .from("payment_requests")
+          .update({
+            status: "pending",
+          })
+          .eq("id", request.id)
+          .eq("status", "processing");
+      }
     } finally {
       setPaying(false);
     }
@@ -474,6 +601,15 @@ export default function PayPage() {
         </div>
       )}
 
+      {/* CANCELLED WARNING */}
+      {request.status ===
+        "cancelled" && (
+        <div className="p-3 bg-gray-200 text-gray-700 rounded">
+          This payment request was
+          cancelled
+        </div>
+      )}
+
       {/* WRONG NETWORK */}
       {wrongNetwork &&
         isConnected && (
@@ -526,8 +662,25 @@ export default function PayPage() {
           : request.status ===
             "processing"
           ? "Processing..."
+          : request.status ===
+            "cancelled"
+          ? "Cancelled"
           : "Pay Now"}
       </button>
+
+      {/* CANCEL BUTTON */}
+      {request.status ===
+        "pending" && (
+        <button
+          onClick={handleCancel}
+          disabled={cancelling}
+          className="border border-red-500 text-red-500 px-4 py-2 rounded w-full disabled:opacity-50"
+        >
+          {cancelling
+            ? "Cancelling..."
+            : "Cancel Request"}
+        </button>
+      )}
     </div>
   );
 }
