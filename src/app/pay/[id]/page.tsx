@@ -6,6 +6,10 @@ import { useAccount } from "wagmi";
 
 import { supabase } from "@/lib/supabase/client";
 import WalletButton from "@/components/wallet/connect-button";
+import { toast } from "sonner";
+
+const shortAddress = (addr: string) =>
+  `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
 export default function PayPage() {
   const { id } = useParams();
@@ -19,6 +23,32 @@ export default function PayPage() {
   const [paying, setPaying] = useState(false);
 
   const [timeLeft, setTimeLeft] = useState("");
+
+  //REALTIME UPDATES
+
+  useEffect(() => {
+    if (!id) return;
+
+    const channel = supabase
+      .channel(`payment-${id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "payment_requests",
+          filter: `id=eq.${id}`,
+        },
+        (payload) => {
+          setRequest(payload.new);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id]);
 
   // FETCH REQUEST
   useEffect(() => {
@@ -132,11 +162,11 @@ export default function PayPage() {
         status: "paid",
       });
 
-      alert("Payment completed");
+      toast.success("Payment completed");
     } catch (err) {
       console.error(err);
 
-      alert("Payment failed");
+      toast.error("Payment failed");
     } finally {
       setPaying(false);
     }
@@ -200,7 +230,7 @@ export default function PayPage() {
       <div className="border p-4 rounded space-y-2">
         <p>
           <strong>To:</strong>{" "}
-          {request.recipient_wallet}
+            {shortAddress(request.recipient_wallet)}        
         </p>
 
         <p>
@@ -216,7 +246,11 @@ export default function PayPage() {
         )}
 
         <p className="text-sm text-gray-500">
-          Expires in: {timeLeft}
+        {timeLeft && (
+          <p className="text-sm text-gray-500">
+            Expires in: {timeLeft}
+          </p>
+        )}        
         </p>
       </div>
 
@@ -233,8 +267,7 @@ export default function PayPage() {
       ) : (
         <p className="text-sm">
           Connected:{" "}
-          {address?.slice(0, 6)}...
-          {address?.slice(-4)}
+          {address && shortAddress(address)}
         </p>
       )}
 

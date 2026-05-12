@@ -5,7 +5,7 @@ import { useAccount } from "wagmi";
 import WalletButton from "@/components/wallet/connect-button";
 import { supabase } from "@/lib/supabase/client";
 import { QRCodeCanvas } from "qrcode.react";
-
+import { toast } from "sonner";
 
 export default function CreatePage() {
   const { address, isConnected } = useAccount();
@@ -38,7 +38,7 @@ export default function CreatePage() {
 
       if (error) {
         console.error(error);
-        alert("Failed to create payment request");
+        toast.error("Failed to create payment request");
         return;
       }
 
