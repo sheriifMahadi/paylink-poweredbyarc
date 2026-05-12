@@ -86,6 +86,13 @@ export default function PayPage() {
     "function transfer(address to, uint256 amount) returns (bool)",
   ]);
 
+  // CHECK IF CURRENT USER IS CREATOR
+  const isCreator =
+    !!address &&
+    !!request &&
+    address.toLowerCase() ===
+      request.creator_wallet.toLowerCase();
+
   // REALTIME UPDATES
   useEffect(() => {
     if (!id) return;
@@ -219,10 +226,20 @@ export default function PayPage() {
 
   // HANDLE CANCEL
   const handleCancel = async () => {
-    if (!request) return;
+    if (!request || !address)
+      return;
 
     try {
       setCancelling(true);
+
+      // ONLY CREATOR CAN CANCEL
+      if (!isCreator) {
+        toast.error(
+          "Only the request creator can cancel"
+        );
+
+        return;
+      }
 
       // ONLY PENDING CAN CANCEL
       if (
@@ -235,16 +252,21 @@ export default function PayPage() {
         return;
       }
 
-      const { error } =
+      const { data, error } =
         await supabase
           .from("payment_requests")
           .update({
             status: "cancelled",
           })
           .eq("id", request.id)
-          .eq("status", "pending");
+          .eq("status", "pending")
+          .select();
 
-      if (error) {
+      if (
+        error ||
+        !data ||
+        data.length === 0
+      ) {
         toast.error(
           "Failed to cancel request"
         );
@@ -252,10 +274,9 @@ export default function PayPage() {
         return;
       }
 
-      setRequest({
-        ...request,
-        status: "cancelled",
-      });
+      setRequest(
+        data[0] as PaymentRequest
+      );
 
       toast.success(
         "Payment request cancelled"
@@ -271,7 +292,7 @@ export default function PayPage() {
     }
   };
 
-  // PAYMENT ENGINE
+  // HANDLE PAYMENT
   const handlePay = async () => {
     if (!request || !address)
       return;
@@ -279,7 +300,7 @@ export default function PayPage() {
     try {
       setPaying(true);
 
-      // HARD LOCK AGAINST DOUBLE PAY
+      // GET FRESH REQUEST
       const {
         data: freshRequest,
         error: freshError,
@@ -300,7 +321,7 @@ export default function PayPage() {
         return;
       }
 
-      // PREVENT DOUBLE PAYMENT
+      // PREVENT DUPLICATE PAYMENT
       if (
         freshRequest.status !==
         "pending"
@@ -333,6 +354,11 @@ export default function PayPage() {
             status: "expired",
           })
           .eq("id", freshRequest.id);
+
+        setRequest({
+          ...freshRequest,
+          status: "expired",
+        });
 
         return;
       }
@@ -418,14 +444,43 @@ export default function PayPage() {
       );
 
       // WAIT FOR CONFIRMATION
-      await waitForTransactionReceipt(
-        publicClient,
-        {
-          hash: txHash,
-        }
-      );
+      const receipt =
+        await waitForTransactionReceipt(
+          publicClient,
+          {
+            hash: txHash,
+          }
+        );
+
+      // FAILED / REVERTED TX
+      if (
+        !receipt ||
+        receipt.status !== "success"
+      ) {
+        await supabase
+          .from("payment_requests")
+          .update({
+            status: "pending",
+          })
+          .eq("id", freshRequest.id)
+          .eq("status", "processing");
+
+        setRequest({
+          ...freshRequest,
+          status: "pending",
+        });
+
+        toast.error(
+          "Transaction failed onchain"
+        );
+
+        return;
+      }
 
       // FINALIZE PAYMENT
+      const paidAt =
+        new Date().toISOString();
+
       await supabase
         .from("payment_requests")
         .update({
@@ -435,10 +490,17 @@ export default function PayPage() {
 
           paid_by: address,
 
-          paid_at:
-            new Date().toISOString(),
+          paid_at: paidAt,
         })
         .eq("id", freshRequest.id);
+
+      setRequest({
+        ...freshRequest,
+        status: "paid",
+        tx_hash: txHash,
+        paid_by: address,
+        paid_at: paidAt,
+      });
 
       toast.success(
         "Payment completed"
@@ -446,13 +508,12 @@ export default function PayPage() {
     } catch (err: any) {
       console.error(err);
 
-      // BETTER FAILURE HANDLING
       const message =
         err?.shortMessage ||
         err?.message ||
         "";
 
-      // USER REJECTED TX
+      // USER REJECTED
       if (
         message
           .toLowerCase()
@@ -467,7 +528,7 @@ export default function PayPage() {
         );
       }
 
-      // REVERT PROCESSING -> PENDING
+      // RESET PROCESSING STATE
       if (request?.id) {
         await supabase
           .from("payment_requests")
@@ -476,6 +537,11 @@ export default function PayPage() {
           })
           .eq("id", request.id)
           .eq("status", "processing");
+
+        setRequest({
+          ...request,
+          status: "pending",
+        });
       }
     } finally {
       setPaying(false);
@@ -592,7 +658,7 @@ export default function PayPage() {
         )}
       </div>
 
-      {/* EXPIRED WARNING */}
+      {/* EXPIRED */}
       {request.status ===
         "expired" && (
         <div className="p-3 bg-red-100 text-red-700 rounded">
@@ -601,7 +667,7 @@ export default function PayPage() {
         </div>
       )}
 
-      {/* CANCELLED WARNING */}
+      {/* CANCELLED */}
       {request.status ===
         "cancelled" && (
         <div className="p-3 bg-gray-200 text-gray-700 rounded">
@@ -670,17 +736,18 @@ export default function PayPage() {
 
       {/* CANCEL BUTTON */}
       {request.status ===
-        "pending" && (
-        <button
-          onClick={handleCancel}
-          disabled={cancelling}
-          className="border border-red-500 text-red-500 px-4 py-2 rounded w-full disabled:opacity-50"
-        >
-          {cancelling
-            ? "Cancelling..."
-            : "Cancel Request"}
-        </button>
-      )}
+        "pending" &&
+        isCreator && (
+          <button
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="border border-red-500 text-red-500 px-4 py-2 rounded w-full disabled:opacity-50"
+          >
+            {cancelling
+              ? "Cancelling..."
+              : "Cancel Request"}
+          </button>
+        )}
     </div>
   );
 }
