@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 import WalletButton from "@/components/wallet/connect-button";
 import { supabase } from "@/lib/supabase/client";
+import { QRCodeCanvas } from "qrcode.react";
+
 
 export default function CreatePage() {
   const { address, isConnected } = useAccount();
@@ -29,6 +31,7 @@ export default function CreatePage() {
           amount: Number(amount),
           memo: memo || null,
           status: "pending",
+          expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
         })
         .select()
         .single();
@@ -100,9 +103,19 @@ export default function CreatePage() {
 
       {/* RESULT */}
       {link && (
-        <div className="p-4 border rounded bg-gray-50">
-          <p className="font-medium">Shareable Link:</p>
-          <code className="break-all">{link}</code>
+        <div className="p-4 border rounded bg-gray-50 space-y-4">
+          <p className="font-medium">Shareable Payment Link</p>
+
+          <code className="break-all text-sm">{link}</code>
+
+          {/* QR CODE */}
+          <div className="flex justify-center">
+            <QRCodeCanvas value={link} size={180} />            
+          </div>
+
+          <p className="text-xs text-gray-500 text-center">
+            Scan QR or share link to receive payment
+          </p>
         </div>
       )}
     </div>
