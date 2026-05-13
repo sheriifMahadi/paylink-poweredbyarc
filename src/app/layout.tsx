@@ -6,8 +6,10 @@ import Providers from "@/components/providers/providers";
 
 import WalletClient from "@/components/wallet/wallet-client";
 
+import { Toaster } from "sonner";
+
 export const metadata: Metadata = {
-  title: "ArcPay",
+  title: "PayLink",
   description:
     "Simple USDC payment requests on Arc",
 };
@@ -43,7 +45,7 @@ export default function RootLayout({
 
                   <div>
                     <p className="font-semibold text-lg tracking-tight">
-                      ArcPay
+                      PayLink
                     </p>
 
                     <p className="text-xs text-white/50">
@@ -62,6 +64,12 @@ export default function RootLayout({
               {children}
             </main>
           </div>
+
+          {/* ✅ FIX: TOASTER MUST BE MOUNTED HERE */}
+          <Toaster
+            richColors
+            position="top-right"
+          />
         </Providers>
       </body>
     </html>

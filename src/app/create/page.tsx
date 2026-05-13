@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAccount } from "wagmi";
 
@@ -29,6 +29,9 @@ import PageContainer from "@/components/ui/page-container";
 import WalletButton from "@/components/wallet/connect-button";
 
 export default function CreatePage() {
+  const [mounted, setMounted] =
+    useState(false);
+
   const { address, isConnected } =
     useAccount();
 
@@ -50,6 +53,9 @@ export default function CreatePage() {
   const [copied, setCopied] =
     useState(false);
 
+  useEffect(() => { 
+    setMounted(true);
+  }, []);
   const createRequest = async () => {
     // WALLET CHECK
     if (!address) {
@@ -195,7 +201,7 @@ export default function CreatePage() {
         </div>
 
         {/* WALLET REQUIRED */}
-        {!isConnected && (
+        {mounted && !isConnected&& (
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
             <p className="mb-3 text-sm text-white/70">
               Connect your wallet to
@@ -313,7 +319,7 @@ export default function CreatePage() {
                 createRequest
               }
               disabled={
-                !isConnected ||
+                !mounted || !isConnected ||
                 loading
               }
               className="w-full rounded-2xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-blue-600 px-5 py-4 font-medium transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"

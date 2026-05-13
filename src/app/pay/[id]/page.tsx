@@ -47,7 +47,7 @@ const shortHash = (hash: string) =>
   `${hash.slice(0, 10)}...${hash.slice(-8)}`;
 
 const explorerUrl = (hash: string) =>
-  `https://explorer.arc.net/tx/${hash}`;
+  `https://testnet.arcscan.app/tx/${hash}`;
 
 export default function PayPage() {
   const params = useParams();
@@ -68,13 +68,15 @@ export default function PayPage() {
   const { writeContractAsync } =
     useWriteContract();
 
-  const { data: balance } =
-    useBalance({
-      address,
-      token:
-        process.env
-          .NEXT_PUBLIC_USDC_CONTRACT as `0x${string}`,
-    });
+  const {
+    data: balance,
+    refetch: refetchBalance,
+  } = useBalance({
+    address,
+    token:
+      process.env
+        .NEXT_PUBLIC_USDC_CONTRACT as `0x${string}`,
+  });
 
   const [request, setRequest] =
     useState<PaymentRequest | null>(
@@ -147,7 +149,7 @@ export default function PayPage() {
           .eq("id", id)
           .single();
 
-      if (error) {
+      if (error || !data) {
         setLoading(false);
 
         return;
@@ -203,11 +205,15 @@ export default function PayPage() {
     const interval = setInterval(() => {
       if (!request.expires_at) return;
 
-      const expiresAt = new Date(request.expires_at).getTime();
+      const expiresAt =
+        new Date(
+          request.expires_at
+        ).getTime();
 
       if (isNaN(expiresAt)) return;
 
-      const diff = expiresAt - Date.now();
+      const diff =
+        expiresAt - Date.now();
 
       if (diff <= 0) {
         setTimeLeft("Expired");
@@ -303,8 +309,21 @@ export default function PayPage() {
 
   // PAY
   const handlePay = async () => {
-    if (!request || !address)
+    if (!request) {
+      toast.error(
+        "Payment request not found"
+      );
+
       return;
+    }
+
+    if (!address || !isConnected) {
+      toast.error(
+        "Connect your wallet first"
+      );
+
+      return;
+    }
 
     try {
       setPaying(true);
@@ -350,20 +369,40 @@ export default function PayPage() {
       }
 
       if (wrongNetwork) {
+        toast.info(
+          "Switching to Arc network..."
+        );
+
         await switchChainAsync({
           chainId: ARC_CHAIN_ID,
         });
       }
 
+      const userBalance = Number(
+        balance?.formatted ?? "0"
+      );
+
+      const paymentAmount =
+        Number(
+          freshRequest.amount
+        );
+
       if (
-        balance &&
-        Number(balance.formatted) <
-          Number(
-            freshRequest.amount
-          )
+        Number.isNaN(userBalance)
       ) {
         toast.error(
-          "Insufficient balance"
+          "Unable to verify wallet balance"
+        );
+
+        return;
+      }
+
+      if (
+        userBalance <
+        paymentAmount
+      ) {
+        toast.error(
+          `Insufficient balance. You need ${paymentAmount} USDC`
         );
 
         return;
@@ -385,7 +424,7 @@ export default function PayPage() {
         lockedRows.length === 0
       ) {
         toast.error(
-          "Already processing"
+          "Payment already processing"
         );
 
         return;
@@ -420,7 +459,7 @@ export default function PayPage() {
           ],
         });
 
-      toast.info(
+      toast.success(
         "Transaction submitted"
       );
 
@@ -434,7 +473,8 @@ export default function PayPage() {
 
       if (
         !receipt ||
-        receipt.status !== "success"
+        receipt.status !==
+          "success"
       ) {
         await supabase
           .from("payment_requests")
@@ -476,15 +516,22 @@ export default function PayPage() {
         paid_at: paidAt,
       });
 
+      await refetchBalance();
+
       toast.success(
-        "Payment completed"
+        "Payment completed",
+        {
+          description:
+            shortHash(txHash),
+        }
       );
     } catch (err: unknown) {
       console.error(err);
+
       const message =
-      err instanceof Error
-        ? err.message
-        : "";
+        err instanceof Error
+          ? err.message
+          : "";
 
       if (
         message
@@ -496,7 +543,8 @@ export default function PayPage() {
         );
       } else {
         toast.error(
-          "Payment failed"
+          message ||
+            "Payment failed"
         );
       }
 
@@ -590,15 +638,12 @@ export default function PayPage() {
   return (
     <PageContainer>
       <div className="relative space-y-8">
-        {/* ORBS */}
         <div className="pointer-events-none absolute -top-20 left-0 h-72 w-72 rounded-full bg-fuchsia-600/20 blur-3xl" />
 
         <div className="pointer-events-none absolute top-40 right-0 h-72 w-72 rounded-full bg-blue-600/20 blur-3xl" />
 
-        {/* HERO */}
         <GlassCard>
           <div className="space-y-8 text-center">
-            {/* STATUS */}
             <div
               className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm ${status.className}`}
             >
@@ -614,14 +659,14 @@ export default function PayPage() {
               {request.status.toUpperCase()}
             </div>
 
-            {/* AMOUNT */}
             <div>
-              <p className="text-white/50 text-sm mb-2">
+              <p className="mb-2 text-sm text-white/50">
                 Payment Request
               </p>
 
-              <h1 className="text-5xl sm:text-6xl font-bold tracking-tight">
+              <h1 className="text-5xl font-bold tracking-tight sm:text-6xl">
                 {request.amount}
+
                 <span className="bg-gradient-to-r from-fuchsia-400 via-purple-400 to-blue-400 bg-clip-text text-transparent">
                   {" "}
                   USDC
@@ -629,7 +674,6 @@ export default function PayPage() {
               </h1>
             </div>
 
-            {/* RECIPIENT */}
             <div className="mx-auto max-w-md rounded-3xl border border-white/10 bg-white/[0.04] p-5">
               <div className="flex items-center gap-4">
                 <div className="rounded-2xl bg-fuchsia-500/10 p-3">
@@ -650,20 +694,18 @@ export default function PayPage() {
               </div>
             </div>
 
-            {/* MEMO */}
             {request.memo && (
               <div className="mx-auto max-w-2xl rounded-3xl border border-white/10 bg-black/20 p-5 text-left">
-                <p className="text-xs text-white/50 mb-2">
+                <p className="mb-2 text-xs text-white/50">
                   Memo
                 </p>
 
-                <p className="text-white/80 leading-relaxed">
+                <p className="leading-relaxed text-white/80">
                   {request.memo}
                 </p>
               </div>
             )}
 
-            {/* TIMER */}
             {timeLeft && (
               <div className="mx-auto max-w-sm rounded-3xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-5">
                 <div className="flex items-center justify-center gap-3">
@@ -682,7 +724,6 @@ export default function PayPage() {
               </div>
             )}
 
-            {/* PAY BUTTON */}
             <button
               onClick={handlePay}
               disabled={
@@ -712,7 +753,6 @@ export default function PayPage() {
               )}
             </button>
 
-            {/* CANCEL */}
             {request.status ===
               "pending" &&
               isCreator && (
@@ -733,7 +773,6 @@ export default function PayPage() {
           </div>
         </GlassCard>
 
-        {/* WALLET CARD */}
         {isConnected && (
           <GlassCard>
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
@@ -770,7 +809,6 @@ export default function PayPage() {
           </GlassCard>
         )}
 
-        {/* WRONG NETWORK */}
         {wrongNetwork &&
           isConnected && (
             <GlassCard>
@@ -783,7 +821,6 @@ export default function PayPage() {
             </GlassCard>
           )}
 
-        {/* TX */}
         {request.tx_hash && (
           <GlassCard>
             <div className="space-y-4">
@@ -792,7 +829,7 @@ export default function PayPage() {
                   Transaction Hash
                 </p>
 
-                <p className="mt-1 font-medium break-all">
+                <p className="mt-1 break-all font-medium">
                   {shortHash(
                     request.tx_hash
                   )}
@@ -815,7 +852,6 @@ export default function PayPage() {
           </GlassCard>
         )}
 
-        {/* CONNECT */}
         {!isConnected && (
           <GlassCard>
             <div className="space-y-4 text-center">
