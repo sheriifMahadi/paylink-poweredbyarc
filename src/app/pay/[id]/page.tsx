@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
 import { useParams } from "next/navigation";
 
 import {
@@ -15,18 +16,35 @@ import { parseAbi } from "viem";
 
 import { waitForTransactionReceipt } from "viem/actions";
 
+import {
+  Wallet,
+  CheckCircle2,
+  Loader2,
+  AlertTriangle,
+  XCircle,
+  ExternalLink,
+  Clock3,
+} from "lucide-react";
+
 import { publicClient } from "@/lib/web3/wagmi";
 
 import { supabase } from "@/lib/supabase/client";
-
-import WalletButton from "@/components/wallet/connect-button";
 
 import { toast } from "sonner";
 
 import type { PaymentRequest } from "@/types/payment";
 
+import GlassCard from "@/components/ui/glass-card";
+
+import PageContainer from "@/components/ui/page-container";
+
+import WalletButton from "@/components/wallet/connect-button";
+
 const shortAddress = (addr: string) =>
   `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+
+const shortHash = (hash: string) =>
+  `${hash.slice(0, 10)}...${hash.slice(-8)}`;
 
 const explorerUrl = (hash: string) =>
   `https://explorer.arc.net/tx/${hash}`;
@@ -86,14 +104,13 @@ export default function PayPage() {
     "function transfer(address to, uint256 amount) returns (bool)",
   ]);
 
-  // CHECK IF CURRENT USER IS CREATOR
   const isCreator =
     !!address &&
     !!request &&
     address.toLowerCase() ===
       request.creator_wallet.toLowerCase();
 
-  // REALTIME UPDATES
+  // REALTIME
   useEffect(() => {
     if (!id) return;
 
@@ -120,7 +137,7 @@ export default function PayPage() {
     };
   }, [id]);
 
-  // FETCH REQUEST
+  // FETCH
   useEffect(() => {
     const fetchRequest = async () => {
       const { data, error } =
@@ -131,14 +148,11 @@ export default function PayPage() {
           .single();
 
       if (error) {
-        console.error(error);
-
         setLoading(false);
 
         return;
       }
 
-      // AUTO EXPIRE
       const isExpired =
         data.expires_at &&
         new Date(
@@ -171,7 +185,7 @@ export default function PayPage() {
     }
   }, [id]);
 
-  // COUNTDOWN TIMER
+  // TIMER
   useEffect(() => {
     if (!request?.expires_at) return;
 
@@ -224,7 +238,7 @@ export default function PayPage() {
       clearInterval(interval);
   }, [request]);
 
-  // HANDLE CANCEL
+  // CANCEL
   const handleCancel = async () => {
     if (!request || !address)
       return;
@@ -232,21 +246,19 @@ export default function PayPage() {
     try {
       setCancelling(true);
 
-      // ONLY CREATOR CAN CANCEL
       if (!isCreator) {
         toast.error(
-          "Only the request creator can cancel"
+          "Only creator can cancel"
         );
 
         return;
       }
 
-      // ONLY PENDING CAN CANCEL
       if (
         request.status !== "pending"
       ) {
         toast.error(
-          "Cannot cancel resolved request"
+          "Cannot cancel request"
         );
 
         return;
@@ -268,7 +280,7 @@ export default function PayPage() {
         data.length === 0
       ) {
         toast.error(
-          "Failed to cancel request"
+          "Failed to cancel"
         );
 
         return;
@@ -281,18 +293,12 @@ export default function PayPage() {
       toast.success(
         "Payment request cancelled"
       );
-    } catch (err) {
-      console.error(err);
-
-      toast.error(
-        "Cancellation failed"
-      );
     } finally {
       setCancelling(false);
     }
   };
 
-  // HANDLE PAYMENT
+  // PAY
   const handlePay = async () => {
     if (!request || !address)
       return;
@@ -300,10 +306,8 @@ export default function PayPage() {
     try {
       setPaying(true);
 
-      // GET FRESH REQUEST
       const {
         data: freshRequest,
-        error: freshError,
       } = await supabase
         .from("payment_requests")
         .select("*")
@@ -311,43 +315,23 @@ export default function PayPage() {
         .single();
 
       if (
-        freshError ||
-        !freshRequest
-      ) {
-        toast.error(
-          "Failed to verify payment request"
-        );
-
-        return;
-      }
-
-      // PREVENT DUPLICATE PAYMENT
-      if (
+        !freshRequest ||
         freshRequest.status !==
-        "pending"
+          "pending"
       ) {
         toast.error(
-          `Request already ${freshRequest.status}`
-        );
-
-        setRequest(
-          freshRequest as PaymentRequest
+          "Payment unavailable"
         );
 
         return;
       }
 
-      // EXPIRED CHECK
       if (
         freshRequest.expires_at &&
         new Date(
           freshRequest.expires_at
         ).getTime() < Date.now()
       ) {
-        toast.error(
-          "Payment request expired"
-        );
-
         await supabase
           .from("payment_requests")
           .update({
@@ -355,22 +339,19 @@ export default function PayPage() {
           })
           .eq("id", freshRequest.id);
 
-        setRequest({
-          ...freshRequest,
-          status: "expired",
-        });
+        toast.error(
+          "Request expired"
+        );
 
         return;
       }
 
-      // NETWORK ENFORCEMENT
       if (wrongNetwork) {
         await switchChainAsync({
           chainId: ARC_CHAIN_ID,
         });
       }
 
-      // BALANCE CHECK
       if (
         balance &&
         Number(balance.formatted) <
@@ -379,16 +360,14 @@ export default function PayPage() {
           )
       ) {
         toast.error(
-          "Insufficient USDC balance"
+          "Insufficient balance"
         );
 
         return;
       }
 
-      // PROCESSING LOCK
       const {
         data: lockedRows,
-        error: lockError,
       } = await supabase
         .from("payment_requests")
         .update({
@@ -399,12 +378,11 @@ export default function PayPage() {
         .select();
 
       if (
-        lockError ||
         !lockedRows ||
         lockedRows.length === 0
       ) {
         toast.error(
-          "Request already being processed"
+          "Already processing"
         );
 
         return;
@@ -415,7 +393,6 @@ export default function PayPage() {
         status: "processing",
       });
 
-      // SEND TRANSACTION
       const txHash =
         await writeContractAsync({
           address:
@@ -424,7 +401,8 @@ export default function PayPage() {
 
           abi: USDC_ABI,
 
-          functionName: "transfer",
+          functionName:
+            "transfer",
 
           args: [
             freshRequest.recipient_wallet as `0x${string}`,
@@ -443,7 +421,6 @@ export default function PayPage() {
         "Transaction submitted"
       );
 
-      // WAIT FOR CONFIRMATION
       const receipt =
         await waitForTransactionReceipt(
           publicClient,
@@ -452,7 +429,6 @@ export default function PayPage() {
           }
         );
 
-      // FAILED / REVERTED TX
       if (
         !receipt ||
         receipt.status !== "success"
@@ -462,8 +438,7 @@ export default function PayPage() {
           .update({
             status: "pending",
           })
-          .eq("id", freshRequest.id)
-          .eq("status", "processing");
+          .eq("id", freshRequest.id);
 
         setRequest({
           ...freshRequest,
@@ -471,13 +446,12 @@ export default function PayPage() {
         });
 
         toast.error(
-          "Transaction failed onchain"
+          "Transaction failed"
         );
 
         return;
       }
 
-      // FINALIZE PAYMENT
       const paidAt =
         new Date().toISOString();
 
@@ -485,11 +459,8 @@ export default function PayPage() {
         .from("payment_requests")
         .update({
           status: "paid",
-
           tx_hash: txHash,
-
           paid_by: address,
-
           paid_at: paidAt,
         })
         .eq("id", freshRequest.id);
@@ -506,14 +477,11 @@ export default function PayPage() {
         "Payment completed"
       );
     } catch (err: any) {
-      console.error(err);
-
       const message =
         err?.shortMessage ||
         err?.message ||
         "";
 
-      // USER REJECTED
       if (
         message
           .toLowerCase()
@@ -528,7 +496,6 @@ export default function PayPage() {
         );
       }
 
-      // RESET PROCESSING STATE
       if (request?.id) {
         await supabase
           .from("payment_requests")
@@ -548,206 +515,318 @@ export default function PayPage() {
     }
   };
 
-  // LOADING
   if (loading) {
     return (
-      <div className="p-6">
-        Loading...
-      </div>
+      <PageContainer>
+        <div className="flex justify-center py-32">
+          <Loader2 className="h-10 w-10 animate-spin text-fuchsia-400" />
+        </div>
+      </PageContainer>
     );
   }
 
-  // NOT FOUND
   if (!request) {
     return (
-      <div className="p-6">
-        Request not found
-      </div>
+      <PageContainer>
+        <GlassCard>
+          <div className="text-center py-10">
+            Request not found
+          </div>
+        </GlassCard>
+      </PageContainer>
     );
   }
 
-  // PAYMENT LOCK
   const paymentLocked =
     request.status === "paid" ||
     request.status === "expired" ||
     request.status ===
       "cancelled";
 
-  // STATUS COLORS
-  const statusColors: Record<
-    string,
-    string
-  > = {
-    pending:
-      "bg-yellow-100 text-yellow-700",
+  const statusMap = {
+    pending: {
+      icon: Clock3,
+      className:
+        "bg-yellow-500/10 text-yellow-300 border-yellow-500/20",
+    },
 
-    processing:
-      "bg-blue-100 text-blue-700",
+    processing: {
+      icon: Loader2,
+      className:
+        "bg-blue-500/10 text-blue-300 border-blue-500/20",
+    },
 
-    paid:
-      "bg-green-100 text-green-700",
+    paid: {
+      icon: CheckCircle2,
+      className:
+        "bg-green-500/10 text-green-300 border-green-500/20",
+    },
 
-    expired:
-      "bg-red-100 text-red-700",
+    expired: {
+      icon: AlertTriangle,
+      className:
+        "bg-red-500/10 text-red-300 border-red-500/20",
+    },
 
-    cancelled:
-      "bg-gray-200 text-gray-700",
-
-    failed:
-      "bg-orange-100 text-orange-700",
+    cancelled: {
+      icon: XCircle,
+      className:
+        "bg-gray-500/10 text-gray-300 border-gray-500/20",
+    },
   };
 
+  const status =
+    statusMap[
+      request.status as keyof typeof statusMap
+    ];
+
+  const StatusIcon =
+    status?.icon || Clock3;
+
   return (
-    <div className="max-w-xl w-full mx-auto px-4 sm:px-6 py-6 space-y-4">
-      <h1 className="text-2xl font-bold">
-        Payment Request
-      </h1>
+    <PageContainer>
+      <div className="relative space-y-8">
+        {/* ORBS */}
+        <div className="pointer-events-none absolute -top-20 left-0 h-72 w-72 rounded-full bg-fuchsia-600/20 blur-3xl" />
 
-      {/* STATUS */}
-      <div
-        className={`px-3 py-1 rounded text-sm inline-block ${
-          statusColors[
-            request.status
-          ] ||
-          "bg-gray-100 text-gray-700"
-        }`}
-      >
-        {request.status.toUpperCase()}
-      </div>
+        <div className="pointer-events-none absolute top-40 right-0 h-72 w-72 rounded-full bg-blue-600/20 blur-3xl" />
 
-      {/* DETAILS */}
-      <div className="border p-4 rounded space-y-2">
-        <p>
-          <strong>To:</strong>{" "}
-          {shortAddress(
-            request.recipient_wallet
-          )}
-        </p>
-
-        <p>
-          <strong>Amount:</strong>{" "}
-          {request.amount} USDC
-        </p>
-
-        {request.memo && (
-          <p>
-            <strong>Memo:</strong>{" "}
-            {request.memo}
-          </p>
-        )}
-
-        {timeLeft && (
-          <p className="text-sm text-gray-500">
-            Expires in: {timeLeft}
-          </p>
-        )}
-
-        {request.tx_hash && (
-          <div className="pt-2">
-            <a
-              href={explorerUrl(
-                request.tx_hash
-              )}
-              target="_blank"
-              rel="noreferrer"
-              className="text-blue-500 underline break-all text-sm"
+        {/* HERO */}
+        <GlassCard>
+          <div className="space-y-8 text-center">
+            {/* STATUS */}
+            <div
+              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm ${status.className}`}
             >
-              View Transaction
-            </a>
+              <StatusIcon
+                className={`h-4 w-4 ${
+                  request.status ===
+                  "processing"
+                    ? "animate-spin"
+                    : ""
+                }`}
+              />
+
+              {request.status.toUpperCase()}
+            </div>
+
+            {/* AMOUNT */}
+            <div>
+              <p className="text-white/50 text-sm mb-2">
+                Payment Request
+              </p>
+
+              <h1 className="text-5xl sm:text-6xl font-bold tracking-tight">
+                {request.amount}
+                <span className="bg-gradient-to-r from-fuchsia-400 via-purple-400 to-blue-400 bg-clip-text text-transparent">
+                  {" "}
+                  USDC
+                </span>
+              </h1>
+            </div>
+
+            {/* RECIPIENT */}
+            <div className="mx-auto max-w-md rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+              <div className="flex items-center gap-4">
+                <div className="rounded-2xl bg-fuchsia-500/10 p-3">
+                  <Wallet className="h-5 w-5 text-fuchsia-300" />
+                </div>
+
+                <div className="text-left">
+                  <p className="text-xs text-white/50">
+                    Recipient Wallet
+                  </p>
+
+                  <p className="font-medium">
+                    {shortAddress(
+                      request.recipient_wallet
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* MEMO */}
+            {request.memo && (
+              <div className="mx-auto max-w-2xl rounded-3xl border border-white/10 bg-black/20 p-5 text-left">
+                <p className="text-xs text-white/50 mb-2">
+                  Memo
+                </p>
+
+                <p className="text-white/80 leading-relaxed">
+                  {request.memo}
+                </p>
+              </div>
+            )}
+
+            {/* TIMER */}
+            {timeLeft && (
+              <div className="mx-auto max-w-sm rounded-3xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-5">
+                <div className="flex items-center justify-center gap-3">
+                  <Clock3 className="h-5 w-5 text-fuchsia-300" />
+
+                  <div>
+                    <p className="text-xs text-white/50">
+                      Expires In
+                    </p>
+
+                    <p className="text-lg font-semibold text-fuchsia-300">
+                      {timeLeft}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* PAY BUTTON */}
+            <button
+              onClick={handlePay}
+              disabled={
+                !isConnected ||
+                paying ||
+                paymentLocked
+              }
+              className="w-full rounded-3xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-blue-600 px-6 py-5 text-lg font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {paying ? (
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+
+                  Processing Payment...
+                </div>
+              ) : request.status ===
+                "paid" ? (
+                "Payment Completed"
+              ) : request.status ===
+                "expired" ? (
+                "Request Expired"
+              ) : request.status ===
+                "cancelled" ? (
+                "Request Cancelled"
+              ) : (
+                "Pay Now"
+              )}
+            </button>
+
+            {/* CANCEL */}
+            {request.status ===
+              "pending" &&
+              isCreator && (
+                <button
+                  onClick={
+                    handleCancel
+                  }
+                  disabled={
+                    cancelling
+                  }
+                  className="w-full rounded-3xl border border-red-500/20 bg-red-500/10 px-6 py-4 font-medium text-red-300 transition hover:bg-red-500/20"
+                >
+                  {cancelling
+                    ? "Cancelling..."
+                    : "Cancel Request"}
+                </button>
+              )}
           </div>
+        </GlassCard>
+
+        {/* WALLET CARD */}
+        {isConnected && (
+          <GlassCard>
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm text-white/50">
+                  Connected Wallet
+                </p>
+
+                <p className="mt-1 font-medium">
+                  {address &&
+                    shortAddress(
+                      address
+                    )}
+                </p>
+              </div>
+
+              {balance && (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4">
+                  <p className="text-xs text-white/50">
+                    Balance
+                  </p>
+
+                  <p className="mt-1 text-lg font-semibold">
+                    {Number(
+                      balance.formatted
+                    ).toFixed(2)}{" "}
+                    {
+                      balance.symbol
+                    }
+                  </p>
+                </div>
+              )}
+            </div>
+          </GlassCard>
+        )}
+
+        {/* WRONG NETWORK */}
+        {wrongNetwork &&
+          isConnected && (
+            <GlassCard>
+              <div className="flex items-center gap-3 text-yellow-300">
+                <AlertTriangle className="h-5 w-5" />
+
+                Wrong network detected.
+                Please switch to Arc.
+              </div>
+            </GlassCard>
+          )}
+
+        {/* TX */}
+        {request.tx_hash && (
+          <GlassCard>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm text-white/50">
+                  Transaction Hash
+                </p>
+
+                <p className="mt-1 font-medium break-all">
+                  {shortHash(
+                    request.tx_hash
+                  )}
+                </p>
+              </div>
+
+              <a
+                href={explorerUrl(
+                  request.tx_hash
+                )}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 transition hover:bg-white/[0.08]"
+              >
+                View on Explorer
+
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            </div>
+          </GlassCard>
+        )}
+
+        {/* CONNECT */}
+        {!isConnected && (
+          <GlassCard>
+            <div className="space-y-4 text-center">
+              <p className="text-white/70">
+                Connect wallet to make
+                payment
+              </p>
+
+              <div className="flex justify-center">
+                <WalletButton />
+              </div>
+            </div>
+          </GlassCard>
         )}
       </div>
-
-      {/* EXPIRED */}
-      {request.status ===
-        "expired" && (
-        <div className="p-3 bg-red-100 text-red-700 rounded">
-          This payment request has
-          expired
-        </div>
-      )}
-
-      {/* CANCELLED */}
-      {request.status ===
-        "cancelled" && (
-        <div className="p-3 bg-gray-200 text-gray-700 rounded">
-          This payment request was
-          cancelled
-        </div>
-      )}
-
-      {/* WRONG NETWORK */}
-      {wrongNetwork &&
-        isConnected && (
-          <div className="p-3 bg-yellow-100 text-yellow-700 rounded">
-            Wrong network detected.
-            Please switch to Arc.
-          </div>
-        )}
-
-      {/* WALLET */}
-      {!isConnected ? (
-        <WalletButton />
-      ) : (
-        <p className="text-sm">
-          Connected:{" "}
-          {address &&
-            shortAddress(address)}
-        </p>
-      )}
-
-      {/* BALANCE */}
-      {balance && (
-        <div className="text-sm text-gray-500">
-          Balance:{" "}
-          {Number(
-            balance.formatted
-          ).toFixed(2)}{" "}
-          {balance.symbol}
-        </div>
-      )}
-
-      {/* PAY BUTTON */}
-      <button
-        onClick={handlePay}
-        disabled={
-          !isConnected ||
-          paying ||
-          paymentLocked
-        }
-        className="bg-black text-white px-4 py-2 rounded w-full disabled:opacity-50"
-      >
-        {paying
-          ? "Processing..."
-          : request.status ===
-            "paid"
-          ? "Already Paid"
-          : request.status ===
-            "expired"
-          ? "Expired"
-          : request.status ===
-            "processing"
-          ? "Processing..."
-          : request.status ===
-            "cancelled"
-          ? "Cancelled"
-          : "Pay Now"}
-      </button>
-
-      {/* CANCEL BUTTON */}
-      {request.status ===
-        "pending" &&
-        isCreator && (
-          <button
-            onClick={handleCancel}
-            disabled={cancelling}
-            className="border border-red-500 text-red-500 px-4 py-2 rounded w-full disabled:opacity-50"
-          >
-            {cancelling
-              ? "Cancelling..."
-              : "Cancel Request"}
-          </button>
-        )}
-    </div>
+    </PageContainer>
   );
 }
