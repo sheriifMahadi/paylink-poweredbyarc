@@ -202,10 +202,12 @@ export default function PayPage() {
 
     const interval = setInterval(() => {
       if (!request.expires_at) return;
-      const expiresAt = new Date(request.expires_at).getTime;
+
+      const expiresAt = new Date(request.expires_at).getTime();
+
       if (isNaN(expiresAt)) return;
 
-      const diff = expiresAt() - Date.now();
+      const diff = expiresAt - Date.now();
 
       if (diff <= 0) {
         setTimeLeft("Expired");
