@@ -1,9 +1,7 @@
 import WalletButton from "@/components/wallet/connect-button";
+import { redirect } from "next/navigation";
+
 
 export default function HomePage() {
-  return (
-    <main className="flex min-h-screen items-center justify-center">
-      <WalletButton />
-    </main>
-  );
+  redirect("/create")
 }
