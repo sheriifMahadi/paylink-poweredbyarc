@@ -476,11 +476,12 @@ export default function PayPage() {
       toast.success(
         "Payment completed"
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      console.error(err);
       const message =
-        err?.shortMessage ||
-        err?.message ||
-        "";
+      err instanceof Error
+        ? err.message
+        : "";
 
       if (
         message
