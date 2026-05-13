@@ -81,7 +81,7 @@ export default function CreatePage() {
 
     if (!parsed.success) {
       toast.error(
-        parsed.error.errors[0].message
+        parsed.error.issues[0].message
       );
 
       return;
