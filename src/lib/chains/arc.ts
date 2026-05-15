@@ -1,30 +1,41 @@
 import { defineChain } from "viem";
 
 export const arc = defineChain({
-  id: Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID),
+  id: Number(
+    process.env
+      .NEXT_PUBLIC_ARC_CHAIN_ID
+  ),
 
-  name: "Arc",
+  name: "Arc Testnet",
 
-  network: "arc",
+  network: "arc-testnet",
 
   nativeCurrency: {
-    name: "Ethereum",
-    symbol: "ETH",
+    name: "USDC",
+    symbol: "USDC",
     decimals: 18,
   },
 
   rpcUrls: {
     default: {
       http: [
-        process.env.NEXT_PUBLIC_ARC_RPC_URL || "",
+        process.env
+          .NEXT_PUBLIC_ARC_RPC_URL || "",
+      ],
+    },
+
+    public: {
+      http: [
+        process.env
+          .NEXT_PUBLIC_ARC_RPC_URL || "",
       ],
     },
   },
 
   blockExplorers: {
     default: {
-      name: "Arc Explorer",
-      url: "https://testnet.arcscan.app/",
+      name: "ArcScan",
+      url: "https://testnet.arcscan.app",
     },
   },
 
