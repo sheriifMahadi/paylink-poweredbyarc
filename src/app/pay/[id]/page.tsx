@@ -40,6 +40,8 @@ import PageContainer from "@/components/ui/page-container";
 
 import WalletButton from "@/components/wallet/connect-button";
 
+import BridgeWidget from "@/components/pay/bridge-widget";
+
 const shortAddress = (addr: string) =>
   `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
@@ -94,6 +96,9 @@ export default function PayPage() {
 
   const [timeLeft, setTimeLeft] =
     useState("");
+
+  const [bridgeOpen, setBridgeOpen] =
+    useState(false);
 
   const ARC_CHAIN_ID = Number(
     process.env.NEXT_PUBLIC_ARC_CHAIN_ID
@@ -401,8 +406,10 @@ export default function PayPage() {
         userBalance <
         paymentAmount
       ) {
+        setBridgeOpen(true);
+
         toast.error(
-          `Insufficient balance. You need ${paymentAmount} USDC`
+          `Insufficient balance. Bridge USDC to continue`
         );
 
         return;
@@ -581,7 +588,7 @@ export default function PayPage() {
     return (
       <PageContainer>
         <GlassCard>
-          <div className="text-center py-10">
+          <div className="py-10 text-center">
             Request not found
           </div>
         </GlassCard>
@@ -594,6 +601,12 @@ export default function PayPage() {
     request.status === "expired" ||
     request.status ===
       "cancelled";
+
+  const insufficientBalance =
+    !!balance &&
+    !!request &&
+    Number(balance.formatted) <
+      Number(request.amount);
 
   const statusMap = {
     pending: {
@@ -724,6 +737,26 @@ export default function PayPage() {
               </div>
             )}
 
+            {/* BRIDGE WIDGET */}
+            {isConnected &&
+              request.status ===
+                "pending" &&
+              insufficientBalance && (
+                <BridgeWidget
+                  open={bridgeOpen}
+                  onToggle={() =>
+                    setBridgeOpen(
+                      !bridgeOpen
+                    )
+                  }
+                  amount={Number(
+                    request.amount
+                  )}
+                  wallet={address}
+                />
+              )}
+
+            {/* PAY BUTTON */}
             <button
               onClick={handlePay}
               disabled={
@@ -748,11 +781,14 @@ export default function PayPage() {
               ) : request.status ===
                 "cancelled" ? (
                 "Request Cancelled"
+              ) : insufficientBalance ? (
+                "Bridge & Pay"
               ) : (
                 "Pay Now"
               )}
             </button>
 
+            {/* CANCEL */}
             {request.status ===
               "pending" &&
               isCreator && (
@@ -773,6 +809,7 @@ export default function PayPage() {
           </div>
         </GlassCard>
 
+        {/* WALLET */}
         {isConnected && (
           <GlassCard>
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
@@ -809,6 +846,7 @@ export default function PayPage() {
           </GlassCard>
         )}
 
+        {/* WRONG NETWORK */}
         {wrongNetwork &&
           isConnected && (
             <GlassCard>
@@ -821,6 +859,7 @@ export default function PayPage() {
             </GlassCard>
           )}
 
+        {/* TX HASH */}
         {request.tx_hash && (
           <GlassCard>
             <div className="space-y-4">
@@ -852,6 +891,7 @@ export default function PayPage() {
           </GlassCard>
         )}
 
+        {/* CONNECT */}
         {!isConnected && (
           <GlassCard>
             <div className="space-y-4 text-center">
