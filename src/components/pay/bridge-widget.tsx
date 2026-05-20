@@ -8,6 +8,7 @@ import {
   ChevronUp,
   Loader2,
   Check,
+  ExternalLink,
 } from "lucide-react";
 
 import { toast } from "sonner";
@@ -17,6 +18,9 @@ type Props = {
   onToggle: () => void;
   amount: number;
   wallet?: string;
+
+  // optional callback later
+  onBridgeSuccess?: () => void;
 };
 
 const chains = [
@@ -25,11 +29,13 @@ const chains = [
     name: "Base",
     speed: "Fast",
   },
+
   {
     id: "arbitrum",
     name: "Arbitrum",
     speed: "Fast",
   },
+
   {
     id: "ethereum",
     name: "Ethereum",
@@ -42,16 +48,27 @@ export default function BridgeWidget({
   onToggle,
   amount,
   wallet,
+  onBridgeSuccess,
 }: Props) {
   const [
     selectedChain,
     setSelectedChain,
-  ] = useState<string>("base");
+  ] = useState("base");
 
   const [
     bridging,
     setBridging,
   ] = useState(false);
+
+  const [
+    bridgeStatus,
+    setBridgeStatus,
+  ] = useState<
+    | "idle"
+    | "preparing"
+    | "bridging"
+    | "completed"
+  >("idle");
 
   const handleBridge = async () => {
     try {
@@ -65,10 +82,18 @@ export default function BridgeWidget({
 
       setBridging(true);
 
-      toast.info(
-        "Preparing bridge..."
+      setBridgeStatus(
+        "preparing"
       );
 
+      toast.info(
+        `Preparing bridge from ${selectedChain}...`
+      );
+
+      /*
+        STEP 1:
+        Ask backend to prepare bridge
+      */
       const res = await fetch(
         "/api/bridge",
         {
@@ -93,18 +118,65 @@ export default function BridgeWidget({
       const data =
         await res.json();
 
-      console.log(data);
+      console.log(
+        "Bridge route response:",
+        data
+      );
 
       if (!res.ok) {
         throw new Error(
           data.error ||
-            "Bridge failed"
+            "Failed to initialize bridge"
         );
       }
+
+      /*
+        IMPORTANT:
+
+        We are NO LONGER manually
+        executing depositForBurn here.
+
+        Arc SDK / bridge orchestration
+        will handle:
+        - burn
+        - attestation
+        - mint
+        - relay
+      */
+
+      setBridgeStatus(
+        "bridging"
+      );
 
       toast.success(
         "Bridge initialized"
       );
+
+      /*
+        TEMP MOCK FLOW
+
+        Simulate bridge completion.
+
+        Later:
+        - poll Arc bridge status
+        - wait for destination mint
+        - refetch balance
+        - auto-trigger payment
+      */
+
+      setTimeout(() => {
+        setBridgeStatus(
+          "completed"
+        );
+
+        toast.success(
+          "Funds arrived on Arc"
+        );
+
+        onBridgeSuccess?.();
+
+        onToggle();
+      }, 5000);
     } catch (err) {
       console.error(err);
 
@@ -113,6 +185,8 @@ export default function BridgeWidget({
           ? err.message
           : "Bridge failed"
       );
+
+      setBridgeStatus("idle");
     } finally {
       setBridging(false);
     }
@@ -120,6 +194,7 @@ export default function BridgeWidget({
 
   return (
     <div className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 p-5 text-left">
+      {/* TOP */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -135,7 +210,8 @@ export default function BridgeWidget({
             <span className="font-semibold text-white">
               {amount} USDC
             </span>{" "}
-            on Arc to complete this payment.
+            on Arc to complete this
+            payment.
           </p>
 
           <p className="mt-1 text-sm text-white/50">
@@ -165,8 +241,9 @@ export default function BridgeWidget({
         </button>
       </div>
 
+      {/* EXPANDED */}
       {open && (
-        <div className="mt-5 space-y-4 rounded-3xl border border-white/10 bg-black/20 p-5">
+        <div className="mt-5 space-y-5 rounded-3xl border border-white/10 bg-black/20 p-5">
           {/* HEADER */}
           <div>
             <p className="text-sm font-medium text-white">
@@ -195,6 +272,9 @@ export default function BridgeWidget({
                       chain.id
                     )
                   }
+                  disabled={
+                    bridging
+                  }
                   className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
                     active
                       ? "border-fuchsia-500 bg-fuchsia-500/10"
@@ -216,7 +296,8 @@ export default function BridgeWidget({
                       </div>
 
                       <p className="text-xs text-white/50">
-                        Bridge USDC from{" "}
+                        Bridge USDC
+                        from{" "}
                         {
                           chain.name
                         }
@@ -234,27 +315,76 @@ export default function BridgeWidget({
             })}
           </div>
 
-          {/* FOOTER */}
-          <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-4">
-            <p className="text-sm text-fuchsia-200">
-              Your payment will
-              continue automatically
-              once funds arrive on
-              Arc.
-            </p>
+          {/* STATUS */}
+          {bridgeStatus !==
+            "idle" && (
+            <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-4">
+              {bridgeStatus ===
+                "preparing" && (
+                <div className="flex items-center gap-2 text-sm text-fuchsia-200">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+
+                  Preparing bridge
+                  transaction...
+                </div>
+              )}
+
+              {bridgeStatus ===
+                "bridging" && (
+                <div className="flex items-center gap-2 text-sm text-fuchsia-200">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+
+                  Bridging funds to
+                  Arc...
+                </div>
+              )}
+
+              {bridgeStatus ===
+                "completed" && (
+                <div className="flex items-center gap-2 text-sm text-green-300">
+                  <Check className="h-4 w-4" />
+
+                  Funds received on
+                  Arc.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* INFO */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <div className="flex items-start gap-3">
+              <ExternalLink className="mt-0.5 h-4 w-4 text-white/40" />
+
+              <div>
+                <p className="text-sm text-white/80">
+                  Powered by Circle
+                  CCTP + Arc Bridge
+                </p>
+
+                <p className="mt-1 text-xs leading-relaxed text-white/50">
+                  Funds are bridged
+                  securely and arrive
+                  directly on Arc for
+                  payment completion.
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* ACTION */}
           <button
             onClick={handleBridge}
-            disabled={bridging}
-            className="w-full rounded-2xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-blue-600 px-5 py-4 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            disabled={
+              bridging
+            }
+            className="w-full rounded-2xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-blue-600 px-5 py-4 font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {bridging ? (
               <div className="flex items-center justify-center gap-2">
                 <Loader2 className="h-5 w-5 animate-spin" />
 
-                Preparing Bridge...
+                Bridging...
               </div>
             ) : (
               `Bridge ${amount} USDC`
