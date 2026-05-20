@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { bridgeClient } from "@/lib/bridge/client";
-
-import { bridgeChains } from "@/lib/bridge/chains";
-
-export async function POST(
-  req: Request
-) {
+export async function POST(req: Request) {
   try {
     const body = await req.json();
 
@@ -24,55 +18,22 @@ export async function POST(
       return NextResponse.json(
         {
           success: false,
-          error:
-            "Missing params",
+          error: "Missing params",
         },
         {
           status: 400,
         }
       );
     }
-
-    const source =
-      bridgeChains[
-        fromChain as keyof typeof bridgeChains
-      ];
-
-    const destination =
-      bridgeChains.arc;
-
-    if (!source) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Unsupported source chain",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    const route =
-      await bridgeClient.getRoutes({
-        fromChainId:
-          source.chainId,
-
-        toChainId:
-          destination.chainId,
-
-        token: "USDC",
-
-        amount: (
-          Number(amount) *
-          1_000_000
-        ).toString(),
-      });
 
     return NextResponse.json({
       success: true,
-      route,
+
+      bridge: {
+        fromChain,
+        amount,
+        wallet,
+      },
     });
   } catch (err) {
     console.error(err);
@@ -80,10 +41,7 @@ export async function POST(
     return NextResponse.json(
       {
         success: false,
-        error:
-          err instanceof Error
-            ? err.message
-            : "Bridge failed",
+        error: "Bridge failed",
       },
       {
         status: 500,

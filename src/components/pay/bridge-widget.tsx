@@ -13,33 +13,53 @@ import {
 
 import { toast } from "sonner";
 
+import {
+  useSwitchChain,
+} from "wagmi";
+
+import { BridgeKit } from "@circle-fin/bridge-kit";
+
+import {
+  createViemAdapterFromProvider,
+} from "@circle-fin/adapter-viem-v2";
+
 type Props = {
   open: boolean;
   onToggle: () => void;
   amount: number;
   wallet?: string;
-
-  // optional callback later
   onBridgeSuccess?: () => void;
 };
 
+type BridgeStatus =
+  | "idle"
+  | "preparing"
+  | "bridging"
+  | "completed"
+  | "failed";
+
+const kit = new BridgeKit();
+
 const chains = [
   {
-    id: "base",
-    name: "Base",
+    id: "Base_Sepolia",
+    name: "Base Sepolia",
     speed: "Fast",
+    chainId: 84532,
   },
 
   {
-    id: "arbitrum",
-    name: "Arbitrum",
+    id: "Arbitrum_Sepolia",
+    name: "Arbitrum Sepolia", 
     speed: "Fast",
+    chainId: 421614,
   },
 
   {
-    id: "ethereum",
-    name: "Ethereum",
-    speed: "Slower",
+    id: "Ethereum_Sepolia",
+    name: "Ethereum Sepolia",
+    speed: "Slower", 
+    chainId: 11155111,
   },
 ];
 
@@ -50,25 +70,20 @@ export default function BridgeWidget({
   wallet,
   onBridgeSuccess,
 }: Props) {
-  const [
-    selectedChain,
-    setSelectedChain,
-  ] = useState("base");
+  const [selectedChain, setSelectedChain] =
+    useState("Base");
 
-  const [
-    bridging,
-    setBridging,
-  ] = useState(false);
+  const [bridging, setBridging] =
+    useState(false);
 
-  const [
-    bridgeStatus,
-    setBridgeStatus,
-  ] = useState<
-    | "idle"
-    | "preparing"
-    | "bridging"
-    | "completed"
-  >("idle");
+  const [bridgeStatus, setBridgeStatus] =
+    useState<BridgeStatus>("idle");
+
+  const [explorerUrl, setExplorerUrl] =
+    useState("");
+
+  const { switchChainAsync } =
+    useSwitchChain();
 
   const handleBridge = async () => {
     try {
@@ -80,113 +95,143 @@ export default function BridgeWidget({
         return;
       }
 
+      if (!window.ethereum) {
+        toast.error(
+          "No wallet detected"
+        );
+
+        return;
+      }
+
       setBridging(true);
 
       setBridgeStatus(
         "preparing"
       );
 
-      toast.info(
-        `Preparing bridge from ${selectedChain}...`
-      );
+      setExplorerUrl("");
 
-      /*
-        STEP 1:
-        Ask backend to prepare bridge
-      */
-      const res = await fetch(
-        "/api/bridge",
-        {
-          method: "POST",
+      const sourceChain =
+        chains.find(
+          (c) =>
+            c.id === selectedChain
+        );
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            fromChain:
-              selectedChain,
-
-            amount,
-
-            wallet,
-          }),
-        }
-      );
-
-      const data =
-        await res.json();
-
-      console.log(
-        "Bridge route response:",
-        data
-      );
-
-      if (!res.ok) {
+      if (!sourceChain) {
         throw new Error(
-          data.error ||
-            "Failed to initialize bridge"
+          "Invalid source chain"
         );
       }
 
       /*
-        IMPORTANT:
-
-        We are NO LONGER manually
-        executing depositForBurn here.
-
-        Arc SDK / bridge orchestration
-        will handle:
-        - burn
-        - attestation
-        - mint
-        - relay
+        SWITCH CHAIN
       */
+      toast.info(
+        `Switching to ${sourceChain.name}...`
+      );
+
+      await switchChainAsync({
+        chainId:
+          sourceChain.chainId,
+      });
+
+      /*
+        CREATE ADAPTER
+      */
+      const adapter =
+        await createViemAdapterFromProvider(
+          {
+            provider:
+              window.ethereum,
+          }
+        );
 
       setBridgeStatus(
         "bridging"
       );
 
-      toast.success(
-        "Bridge initialized"
+      toast.info(
+        `Bridging ${amount} USDC from ${sourceChain.name} to Arc...`
+      );
+
+      console.log(
+        "🌉 Starting bridge",
+        {
+          from:
+            sourceChain.id,
+          to: "Arc",
+          amount,
+          wallet,
+        }
       );
 
       /*
-        TEMP MOCK FLOW
+        EXECUTE BRIDGE
+      */    
+const safeAmount = Number(amount).toFixed(6);
+console.log(sourceChain.id, safeAmount, wallet);
+      const result =
+        await kit.bridge({
+          from: {
+            adapter,
+            chain:
+              sourceChain.id,
+          },
 
-        Simulate bridge completion.
+          to: {
+            adapter,
+            chain: "Arc_Testnet",
+          },
 
-        Later:
-        - poll Arc bridge status
-        - wait for destination mint
-        - refetch balance
-        - auto-trigger payment
+          amount: safeAmount,
+
+          recipient: wallet,
+        });
+
+      console.log(
+        "✅ Bridge result:",
+        result
+      );
+
+      /*
+        EXPLORER
       */
-
-      setTimeout(() => {
-        setBridgeStatus(
-          "completed"
+      if (
+        result &&
+        typeof result ===
+          "object" &&
+        "explorerUrl" in result
+      ) {
+        setExplorerUrl(
+          String(
+            result.explorerUrl
+          )
         );
+      }
 
-        toast.success(
-          "Funds arrived on Arc"
-        );
+      setBridgeStatus(
+        "completed"
+      );
 
-        onBridgeSuccess?.();
+      toast.success(
+        "Funds bridged successfully"
+      );
 
-        onToggle();
-      }, 5000);
+      onBridgeSuccess?.();
     } catch (err) {
-      console.error(err);
+      console.error(
+        err
+      );
+
+      setBridgeStatus(
+        "failed"
+      );
 
       toast.error(
         err instanceof Error
           ? err.message
           : "Bridge failed"
       );
-
-      setBridgeStatus("idle");
     } finally {
       setBridging(false);
     }
@@ -194,7 +239,7 @@ export default function BridgeWidget({
 
   return (
     <div className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 p-5 text-left">
-      {/* TOP */}
+      {/* HEADER */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -210,20 +255,20 @@ export default function BridgeWidget({
             <span className="font-semibold text-white">
               {amount} USDC
             </span>{" "}
-            on Arc to complete this
+            on Arc to complete
             payment.
           </p>
 
           <p className="mt-1 text-sm text-white/50">
-            Bridge funds from another
-            chain and continue
-            seamlessly.
+            Bridge funds from
+            another chain.
           </p>
         </div>
 
         <button
           onClick={onToggle}
-          className="flex items-center gap-2 rounded-2xl bg-yellow-400 px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90"
+          disabled={bridging}
+          className="flex items-center gap-2 rounded-2xl bg-yellow-400 px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-50"
         >
           {open ? (
             <>
@@ -241,143 +286,141 @@ export default function BridgeWidget({
         </button>
       </div>
 
-      {/* EXPANDED */}
+      {/* CONTENT */}
       {open && (
         <div className="mt-5 space-y-5 rounded-3xl border border-white/10 bg-black/20 p-5">
-          {/* HEADER */}
+          {/* CHAINS */}
           <div>
             <p className="text-sm font-medium text-white">
-              Choose Source Chain
+              Select Source Chain
             </p>
 
-            <p className="mt-1 text-xs text-white/50">
-              One bridge transaction
-              will fund your Arc wallet
-              and complete the payment.
-            </p>
-          </div>
+            <div className="mt-4 space-y-3">
+              {chains.map(
+                (chain) => {
+                  const active =
+                    selectedChain ===
+                    chain.id;
 
-          {/* CHAINS */}
-          <div className="space-y-3">
-            {chains.map((chain) => {
-              const active =
-                selectedChain ===
-                chain.id;
-
-              return (
-                <button
-                  key={chain.id}
-                  onClick={() =>
-                    setSelectedChain(
-                      chain.id
-                    )
-                  }
-                  disabled={
-                    bridging
-                  }
-                  className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
-                    active
-                      ? "border-fuchsia-500 bg-fuchsia-500/10"
-                      : "border-white/10 bg-white/[0.04] hover:bg-white/[0.08]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">
-                          {
-                            chain.name
-                          }
-                        </p>
-
-                        {active && (
-                          <Check className="h-4 w-4 text-fuchsia-300" />
-                        )}
-                      </div>
-
-                      <p className="text-xs text-white/50">
-                        Bridge USDC
-                        from{" "}
-                        {
-                          chain.name
-                        }
-                      </p>
-                    </div>
-
-                    <span className="text-xs text-yellow-300">
-                      {
-                        chain.speed
+                  return (
+                    <button
+                      key={chain.id}
+                      disabled={
+                        bridging
                       }
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+                      onClick={() =>
+                        setSelectedChain(
+                          chain.id
+                        )
+                      }
+                      className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
+                        active
+                          ? "border-fuchsia-500 bg-fuchsia-500/10"
+                          : "border-white/10 bg-white/[0.04] hover:bg-white/[0.08]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-white">
+                              {
+                                chain.name
+                              }
+                            </p>
+
+                            {active && (
+                              <Check className="h-4 w-4 text-fuchsia-300" />
+                            )}
+                          </div>
+
+                          <p className="text-xs text-white/50">
+                            Bridge USDC
+                            from{" "}
+                            {
+                              chain.name
+                            }
+                          </p>
+                        </div>
+
+                        <span className="text-xs text-yellow-300">
+                          {
+                            chain.speed
+                          }
+                        </span>
+                      </div>
+                    </button>
+                  );
+                }
+              )}
+            </div>
           </div>
 
           {/* STATUS */}
           {bridgeStatus !==
             "idle" && (
             <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-4">
-              {bridgeStatus ===
-                "preparing" && (
-                <div className="flex items-center gap-2 text-sm text-fuchsia-200">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+              <div className="flex items-center gap-2 text-sm">
+                {bridgeStatus ===
+                "completed" ? (
+                  <Check className="h-4 w-4 text-green-300" />
+                ) : (
+                  <Loader2 className="h-4 w-4 animate-spin text-fuchsia-300" />
+                )}
 
-                  Preparing bridge
-                  transaction...
-                </div>
-              )}
+                <span className="text-white">
+                  {bridgeStatus ===
+                    "preparing" &&
+                    "Preparing bridge..."}
 
-              {bridgeStatus ===
-                "bridging" && (
-                <div className="flex items-center gap-2 text-sm text-fuchsia-200">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {bridgeStatus ===
+                    "bridging" &&
+                    "Waiting for wallet confirmation..."}
 
-                  Bridging funds to
-                  Arc...
-                </div>
-              )}
+                  {bridgeStatus ===
+                    "completed" &&
+                    "Funds arrived on Arc"}
 
-              {bridgeStatus ===
-                "completed" && (
-                <div className="flex items-center gap-2 text-sm text-green-300">
-                  <Check className="h-4 w-4" />
+                  {bridgeStatus ===
+                    "failed" &&
+                    "Bridge failed"}
+                </span>
+              </div>
 
-                  Funds received on
-                  Arc.
-                </div>
+              {explorerUrl && (
+                <a
+                  href={
+                    explorerUrl
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 inline-flex items-center gap-2 text-xs text-blue-300 hover:underline"
+                >
+                  View Transaction
+
+                  <ExternalLink className="h-3 w-3" />
+                </a>
               )}
             </div>
           )}
 
           {/* INFO */}
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <div className="flex items-start gap-3">
-              <ExternalLink className="mt-0.5 h-4 w-4 text-white/40" />
+            <p className="text-sm text-white/80">
+              Powered by Circle
+              Bridge Kit
+            </p>
 
-              <div>
-                <p className="text-sm text-white/80">
-                  Powered by Circle
-                  CCTP + Arc Bridge
-                </p>
-
-                <p className="mt-1 text-xs leading-relaxed text-white/50">
-                  Funds are bridged
-                  securely and arrive
-                  directly on Arc for
-                  payment completion.
-                </p>
-              </div>
-            </div>
+            <p className="mt-1 text-xs text-white/50">
+              Uses your connected
+              wallet directly. No
+              private keys required.
+            </p>
           </div>
 
           {/* ACTION */}
           <button
             onClick={handleBridge}
-            disabled={
-              bridging
-            }
+            disabled={bridging}
             className="w-full rounded-2xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-blue-600 px-5 py-4 font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {bridging ? (
