@@ -20,17 +20,26 @@ import { BridgeKit } from "@circle-fin/bridge-kit";
 import {
   createViemAdapterFromProvider,
 } from "@circle-fin/adapter-viem-v2";
-type BridgeChainIdentifier = 
+
+type BridgeChainIdentifier =
   | "Base_Sepolia"
   | "Arbitrum_Sepolia"
   | "Ethereum_Sepolia"
   | "Arc_Testnet";
+
 type Props = {
   open: boolean;
   onToggle: () => void;
-  amount: number; // Total requested amount
-  currentBalance: number; // Current balance on Arc
+
+  /*
+    IMPORTANT:
+    This is already the MISSING amount
+    passed from the page.
+  */
+  amount: number;
+
   wallet?: string;
+
   onBridgeSuccess?: () => void;
 };
 
@@ -70,15 +79,18 @@ const chains = [
 export default function BridgeWidget({
   open,
   onToggle,
-  amount, // Total requested amount
-  currentBalance = 0, // Current balance on Arc
+  amount,
   wallet,
   onBridgeSuccess,
 }: Props) {
-  // Calculate bridge amount (amount needed + small buffer for fees)
-  const bridgeAmount = Math.max(
-    Number((amount - currentBalance + 0.1).toFixed(6)), 
-    0
+  /*
+    amount is already:
+    paymentAmount - currentBalance
+
+    We only add a tiny buffer.
+  */
+  const bridgeAmount = Number(
+    (Math.max(amount, 0) + 0.1).toFixed(6)
   );
 
   const [selectedChain, setSelectedChain] =
@@ -98,11 +110,13 @@ export default function BridgeWidget({
 
   const handleBridge = async () => {
     let bridgeToast;
+
     try {
       if (!wallet) {
         toast.error(
           "Connect wallet first"
         );
+
         return;
       }
 
@@ -110,6 +124,7 @@ export default function BridgeWidget({
         toast.error(
           "No wallet detected"
         );
+
         return;
       }
 
@@ -126,13 +141,16 @@ export default function BridgeWidget({
       }
 
       setBridging(true);
+
       setExplorerUrl("");
 
-      // Start loading toast
+      /*
+        PREPARING
+      */
       bridgeToast = toast.loading(
         "Preparing bridge transaction...",
         {
-          duration: Infinity
+          duration: Infinity,
         }
       );
 
@@ -143,21 +161,13 @@ export default function BridgeWidget({
         "switching"
       );
 
-      try {
-        await switchChainAsync({
-          chainId:
-            sourceChain.chainId,
-        });
-      } catch (switchError) {
-        toast.dismiss(bridgeToast);
-        toast.error(
-          "Failed to switch network. Please try again."
-        );
-        throw switchError;
-      }
+      await switchChainAsync({
+        chainId:
+          sourceChain.chainId,
+      });
 
       /*
-        CREATE WALLET ADAPTER
+        CREATE ADAPTER
       */
       const adapter =
         await createViemAdapterFromProvider(
@@ -174,57 +184,62 @@ export default function BridgeWidget({
         "awaiting_signature"
       );
 
-      toast.dismiss(bridgeToast);
-      bridgeToast = toast.loading(
-        "Waiting for wallet confirmation...",
-        {
-          duration: Infinity
-        }
+      toast.dismiss(
+        bridgeToast
       );
 
+      bridgeToast =
+        toast.loading(
+          "Waiting for wallet confirmation...",
+          {
+            duration:
+              Infinity,
+          }
+        );
+
       const safeAmount =
-        Number(bridgeAmount).toFixed(6);
+        bridgeAmount.toFixed(6);
 
       /*
         EXECUTE BRIDGE
       */
-      let result;
-      try {
-        result = await kit.bridge({
+      const result =
+        await kit.bridge({
           from: {
             adapter,
-            chain: sourceChain.id as BridgeChainIdentifier,
+            chain:
+              sourceChain.id as BridgeChainIdentifier,
           },
 
           to: {
             adapter,
-            chain: "Arc_Testnet" as BridgeChainIdentifier,
+            chain:
+              "Arc_Testnet" as BridgeChainIdentifier,
           },
 
-          amount: safeAmount,
+          amount:
+            safeAmount,
         });
-      } catch (bridgeError) {
-        toast.dismiss(bridgeToast);
-        toast.error(
-          "Bridge transaction was rejected or failed"
-        );
-        throw bridgeError;
-      }
 
       /*
-        BRIDGE SUBMITTED
+        BRIDGING
       */
       setBridgeStatus(
         "bridging"
       );
 
-      toast.dismiss(bridgeToast);
-      bridgeToast = toast.loading(
-        "Bridge transaction in progress...",
-        {
-          duration: Infinity
-        }
+      toast.dismiss(
+        bridgeToast
       );
+
+      bridgeToast =
+        toast.loading(
+          "Bridge transaction submitted...",
+          {
+            duration:
+              Infinity,
+          }
+        );
 
       console.log(
         "🌉 Bridge Result:",
@@ -232,7 +247,7 @@ export default function BridgeWidget({
       );
 
       /*
-        EXPLORER LINK
+        EXPLORER
       */
       if (
         result &&
@@ -248,26 +263,28 @@ export default function BridgeWidget({
       }
 
       /*
-        COMPLETE
+        SUCCESS
       */
       setBridgeStatus(
         "completed"
       );
 
-      toast.dismiss(bridgeToast);
-      toast.success(
-        "Bridge transaction submitted"
+      toast.dismiss(
+        bridgeToast
       );
 
-      // Force hide widget and trigger balance refresh
-      onBridgeSuccess?.();
+      toast.success(
+        "Bridge submitted successfully"
+      );
 
+      onBridgeSuccess?.();
     } catch (err) {
       console.error(err);
 
-      // Dismiss any existing toasts
       if (bridgeToast) {
-        toast.dismiss(bridgeToast);
+        toast.dismiss(
+          bridgeToast
+        );
       }
 
       setBridgeStatus(
@@ -277,7 +294,7 @@ export default function BridgeWidget({
       toast.error(
         err instanceof Error
           ? err.message
-          : "Bridge transaction failed"
+          : "Bridge failed"
       );
     } finally {
       setBridging(false);
@@ -285,7 +302,9 @@ export default function BridgeWidget({
   };
 
   const renderStatus = () => {
-    switch (bridgeStatus) {
+    switch (
+      bridgeStatus
+    ) {
       case "switching":
         return "Switching network...";
 
@@ -296,7 +315,7 @@ export default function BridgeWidget({
         return "Bridging funds to Arc...";
 
       case "completed":
-        return "Funds arrived on Arc";
+        return "Funds arriving on Arc";
 
       case "failed":
         return "Bridge failed";
@@ -307,7 +326,7 @@ export default function BridgeWidget({
   };
 
   return (
-    <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-left shadow-xl">
+    <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-left shadow-xl backdrop-blur-xl">
       {/* HEADER */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -326,16 +345,29 @@ export default function BridgeWidget({
           {open ? (
             <>
               Close
+
               <ChevronUp className="h-3 w-3" />
             </>
           ) : (
             <>
               Bridge
+
               <ChevronDown className="h-3 w-3" />
             </>
           )}
         </button>
       </div>
+
+      {/* BALANCE INFO
+      <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+        <p className="text-xs text-white/50">
+          Amount required on Arc
+        </p>
+
+        <p className="mt-1 text-lg font-semibold text-white">
+          {bridgeAmount.toFixed(2)} USDC
+        </p>
+      </div> */}
 
       {/* CONTENT */}
       {open && (
@@ -347,51 +379,61 @@ export default function BridgeWidget({
             </p>
 
             <div className="mt-4 space-y-3">
-              {chains.map((chain) => {
-                const active =
-                  selectedChain ===
-                  chain.id;
+              {chains.map(
+                (chain) => {
+                  const active =
+                    selectedChain ===
+                    chain.id;
 
-                return (
-                  <button
-                    key={chain.id}
-                    disabled={bridging}
-                    onClick={() =>
-                      setSelectedChain(
-                        chain.id
-                      )
-                    }
-                    className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
-                      active
-                        ? "border-fuchsia-500 bg-fuchsia-500/10"
-                        : "border-white/10 bg-white/[0.04] hover:bg-white/[0.08]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-white">
-                            {chain.name}
+                  return (
+                    <button
+                      key={chain.id}
+                      disabled={
+                        bridging
+                      }
+                      onClick={() =>
+                        setSelectedChain(
+                          chain.id
+                        )
+                      }
+                      className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
+                        active
+                          ? "border-fuchsia-500 bg-fuchsia-500/10"
+                          : "border-white/10 bg-white/[0.04] hover:bg-white/[0.08]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-white">
+                              {
+                                chain.name
+                              }
+                            </p>
+
+                            {active && (
+                              <Check className="h-4 w-4 text-fuchsia-300" />
+                            )}
+                          </div>
+
+                          <p className="text-xs text-white/50">
+                            Bridge USDC from{" "}
+                            {
+                              chain.name
+                            }
                           </p>
-
-                          {active && (
-                            <Check className="h-4 w-4 text-fuchsia-300" />
-                          )}
                         </div>
 
-                        <p className="text-xs text-white/50">
-                          Bridge USDC from{" "}
-                          {chain.name}
-                        </p>
+                        <span className="text-xs text-yellow-300">
+                          {
+                            chain.speed
+                          }
+                        </span>
                       </div>
-
-                      <span className="text-xs text-yellow-300">
-                        {chain.speed}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                }
+              )}
             </div>
           </div>
 
@@ -429,22 +471,16 @@ export default function BridgeWidget({
             </div>
           )}
 
-          {/* INFO */}
-          {/* <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <p className="text-sm text-white/80">
-              Powered by Circle Bridge Kit
-            </p>
-
-            <p className="mt-1 text-xs text-white/50">
-              Uses your connected wallet directly.
-              No private keys required.
-            </p>
-          </div> */}
-
           {/* ACTION */}
           <button
-            onClick={handleBridge}
-            disabled={bridging}
+            onClick={
+              handleBridge
+            }
+            disabled={
+              bridging ||
+              bridgeAmount <=
+                0
+            }
             className="w-full rounded-2xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-blue-600 px-5 py-4 font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {bridging ? (
@@ -454,7 +490,7 @@ export default function BridgeWidget({
                 Bridging...
               </div>
             ) : (
-              `Bridge ${bridgeAmount.toFixed(6)} USDC`
+              `Bridge ~${bridgeAmount.toFixed(2)} USDC`
             )}
           </button>
         </div>
