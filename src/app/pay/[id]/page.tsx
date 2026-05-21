@@ -73,12 +73,38 @@ export default function PayPage() {
   const {
     data: balance,
     refetch: refetchBalance,
+    isLoading: isBalanceLoading,
   } = useBalance({
     address,
     token:
       process.env
         .NEXT_PUBLIC_USDC_CONTRACT as `0x${string}`,
+    watch: true, // Automatically watch for balance changes
   });
+
+  // Manual trigger for balance refresh after bridge
+  const triggerBalanceRefresh = async () => {
+    // Wait a bit to allow for blockchain confirmation
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Attempt to refetch balance multiple times
+    for (let i = 0; i < 3; i++) {
+      await refetchBalance();
+      
+      // Check if balance is now sufficient
+      const currentBalance = await refetchBalance();
+      if (
+        currentBalance.data && 
+        Number(currentBalance.data.formatted) >= Number(request?.amount)
+      ) {
+        // Balance is now sufficient, break the loop
+        break;
+      }
+      
+      // Wait between retries
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+  };
 
   const [request, setRequest] =
     useState<PaymentRequest | null>(
@@ -183,6 +209,11 @@ export default function PayPage() {
       setRequest(
         data as PaymentRequest
       );
+
+      // Trigger balance refetch when payment status changes
+      if (data.status !== "pending") {
+        await refetchBalance();
+      }
 
       setLoading(false);
     };
@@ -603,6 +634,7 @@ export default function PayPage() {
       "cancelled";
 
   const insufficientBalance =
+    request.status === "pending" &&
     !!balance &&
     !!request &&
     Number(balance.formatted) <
@@ -754,6 +786,13 @@ export default function PayPage() {
                       request.amount
                     )}
                     wallet={address}
+                    onBridgeSuccess={() => {
+                      // Trigger balance refresh
+                      triggerBalanceRefresh();
+                      
+                      // Immediately close the bridge widget
+                      setBridgeOpen(false);
+                    }}
                   />
                 </div>
               )}
@@ -764,7 +803,8 @@ export default function PayPage() {
               disabled={
                 !isConnected ||
                 paying ||
-                paymentLocked
+                paymentLocked ||
+                insufficientBalance
               }
               className="w-full rounded-3xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-blue-600 px-6 py-5 text-lg font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -774,6 +814,10 @@ export default function PayPage() {
 
                   Processing Payment...
                 </div>
+              ) : !isConnected ? (
+                "Connect Wallet"
+              ) : insufficientBalance ? (
+                "Insufficient Balance"
               ) : request.status ===
                 "paid" ? (
                 "Payment Completed"

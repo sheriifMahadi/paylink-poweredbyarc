@@ -85,12 +85,12 @@ export default function BridgeWidget({
     useSwitchChain();
 
   const handleBridge = async () => {
+    let bridgeToast;
     try {
       if (!wallet) {
         toast.error(
           "Connect wallet first"
         );
-
         return;
       }
 
@@ -98,7 +98,6 @@ export default function BridgeWidget({
         toast.error(
           "No wallet detected"
         );
-
         return;
       }
 
@@ -115,8 +114,15 @@ export default function BridgeWidget({
       }
 
       setBridging(true);
-
       setExplorerUrl("");
+
+      // Start loading toast
+      bridgeToast = toast.loading(
+        "Preparing bridge transaction...",
+        {
+          duration: Infinity
+        }
+      );
 
       /*
         SWITCH NETWORK
@@ -125,14 +131,18 @@ export default function BridgeWidget({
         "switching"
       );
 
-      toast.info(
-        `Switching to ${sourceChain.name}...`
-      );
-
-      await switchChainAsync({
-        chainId:
-          sourceChain.chainId,
-      });
+      try {
+        await switchChainAsync({
+          chainId:
+            sourceChain.chainId,
+        });
+      } catch (switchError) {
+        toast.dismiss(bridgeToast);
+        toast.error(
+          "Failed to switch network. Please try again."
+        );
+        throw switchError;
+      }
 
       /*
         CREATE WALLET ADAPTER
@@ -152,8 +162,12 @@ export default function BridgeWidget({
         "awaiting_signature"
       );
 
-      toast.info(
-        "Confirm transaction in wallet"
+      toast.dismiss(bridgeToast);
+      bridgeToast = toast.loading(
+        "Waiting for wallet confirmation...",
+        {
+          duration: Infinity
+        }
       );
 
       const safeAmount =
@@ -162,8 +176,9 @@ export default function BridgeWidget({
       /*
         EXECUTE BRIDGE
       */
-      const result =
-        await kit.bridge({
+      let result;
+      try {
+        result = await kit.bridge({
           from: {
             adapter,
             chain:
@@ -180,6 +195,13 @@ export default function BridgeWidget({
 
           recipient: wallet,
         });
+      } catch (bridgeError) {
+        toast.dismiss(bridgeToast);
+        toast.error(
+          "Bridge transaction was rejected or failed"
+        );
+        throw bridgeError;
+      }
 
       /*
         BRIDGE SUBMITTED
@@ -188,8 +210,12 @@ export default function BridgeWidget({
         "bridging"
       );
 
-      toast.success(
-        "Bridge submitted"
+      toast.dismiss(bridgeToast);
+      bridgeToast = toast.loading(
+        "Bridge transaction in progress...",
+        {
+          duration: Infinity
+        }
       );
 
       console.log(
@@ -220,13 +246,21 @@ export default function BridgeWidget({
         "completed"
       );
 
+      toast.dismiss(bridgeToast);
       toast.success(
-        "Funds bridged successfully"
+        "Bridge transaction submitted"
       );
 
+      // Force hide widget and trigger balance refresh
       onBridgeSuccess?.();
+
     } catch (err) {
       console.error(err);
+
+      // Dismiss any existing toasts
+      if (bridgeToast) {
+        toast.dismiss(bridgeToast);
+      }
 
       setBridgeStatus(
         "failed"
@@ -235,7 +269,7 @@ export default function BridgeWidget({
       toast.error(
         err instanceof Error
           ? err.message
-          : "Bridge failed"
+          : "Bridge transaction failed"
       );
     } finally {
       setBridging(false);
