@@ -202,8 +202,6 @@ export default function BridgeWidget({
           },
 
           amount: safeAmount,
-
-          recipient: wallet,
         });
       } catch (bridgeError) {
         toast.dismiss(bridgeToast);
