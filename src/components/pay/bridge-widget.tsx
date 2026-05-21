@@ -20,7 +20,11 @@ import { BridgeKit } from "@circle-fin/bridge-kit";
 import {
   createViemAdapterFromProvider,
 } from "@circle-fin/adapter-viem-v2";
-
+type BridgeChainIdentifier = 
+  | "Base_Sepolia"
+  | "Arbitrum_Sepolia"
+  | "Ethereum_Sepolia"
+  | "Arc_Testnet";
 type Props = {
   open: boolean;
   onToggle: () => void;
@@ -189,14 +193,12 @@ export default function BridgeWidget({
         result = await kit.bridge({
           from: {
             adapter,
-            chain:
-              sourceChain.id,
+            chain: sourceChain.id as BridgeChainIdentifier,
           },
 
           to: {
             adapter,
-            chain:
-              "Arc_Testnet",
+            chain: "Arc_Testnet" as BridgeChainIdentifier,
           },
 
           amount: safeAmount,
