@@ -698,6 +698,9 @@ export default function PayPage() {
                 amount={
                   missingAmount
                 }
+                currentBalance={
+                  currentBalance
+                }
                 wallet={
                   address
                 }
