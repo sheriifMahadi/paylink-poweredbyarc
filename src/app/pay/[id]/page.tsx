@@ -91,18 +91,8 @@ export default function PayPage() {
     token:
       process.env
         .NEXT_PUBLIC_USDC_CONTRACT as `0x${string}`,
+    watch: true,
   });
-
-  // Manual balance polling
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      if (address) {
-        refetchBalance();
-      }
-    }, 10000); // Refetch every 10 seconds
-
-    return () => clearInterval(intervalId);
-  }, [address, refetchBalance]);
 
   /*
     STATE
