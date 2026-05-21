@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 
 import { useParams } from "next/navigation";
 
@@ -35,12 +40,10 @@ import { toast } from "sonner";
 import type { PaymentRequest } from "@/types/payment";
 
 import GlassCard from "@/components/ui/glass-card";
-
 import PageContainer from "@/components/ui/page-container";
-
 import WalletButton from "@/components/wallet/connect-button";
-
 import BridgeWidget from "@/components/pay/bridge-widget";
+import PaymentActionButton from "@/components/pay/payment-action-button";
 
 const shortAddress = (addr: string) =>
   `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -52,17 +55,16 @@ const explorerUrl = (hash: string) =>
   `https://testnet.arcscan.app/tx/${hash}`;
 
 export default function PayPage() {
+  /*
+    HOOKS
+  */
   const params = useParams();
-
-  const id =
-    typeof params.id === "string"
-      ? params.id
-      : params.id?.[0];
 
   const { address, isConnected } =
     useAccount();
 
-  const chainId = useChainId();
+  const chainId =
+    useChainId();
 
   const { switchChainAsync } =
     useSwitchChain();
@@ -70,49 +72,38 @@ export default function PayPage() {
   const { writeContractAsync } =
     useWriteContract();
 
+  /*
+    PARAMS
+  */
+  const id =
+    typeof params.id === "string"
+      ? params.id
+      : params.id?.[0];
+
+  /*
+    BALANCE
+  */
   const {
     data: balance,
     refetch: refetchBalance,
-    isLoading: isBalanceLoading,
   } = useBalance({
     address,
     token:
       process.env
         .NEXT_PUBLIC_USDC_CONTRACT as `0x${string}`,
-    watch: true, // Automatically watch for balance changes
+    watch: true,
   });
 
-  // Manual trigger for balance refresh after bridge
-  const triggerBalanceRefresh = async () => {
-    // Wait a bit to allow for blockchain confirmation
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    
-    // Attempt to refetch balance multiple times
-    for (let i = 0; i < 3; i++) {
-      await refetchBalance();
-      
-      // Check if balance is now sufficient
-      const currentBalance = await refetchBalance();
-      if (
-        currentBalance.data && 
-        Number(currentBalance.data.formatted) >= Number(request?.amount)
-      ) {
-        // Balance is now sufficient, break the loop
-        break;
-      }
-      
-      // Wait between retries
-      await new Promise(resolve => setTimeout(resolve, 3000));
-    }
-  };
+  /*
+    STATE
+  */
+  const [loading, setLoading] =
+    useState(true);
 
   const [request, setRequest] =
     useState<PaymentRequest | null>(
       null
     );
-
-  const [loading, setLoading] =
-    useState(true);
 
   const [paying, setPaying] =
     useState(false);
@@ -120,12 +111,18 @@ export default function PayPage() {
   const [cancelling, setCancelling] =
     useState(false);
 
-  const [timeLeft, setTimeLeft] =
-    useState("");
-
   const [bridgeOpen, setBridgeOpen] =
     useState(false);
 
+  const [bridging, setBridging] =
+    useState(false);
+
+  const [timeLeft, setTimeLeft] =
+    useState("");
+
+  /*
+    CONSTANTS
+  */
   const ARC_CHAIN_ID = Number(
     process.env.NEXT_PUBLIC_ARC_CHAIN_ID
   );
@@ -137,13 +134,46 @@ export default function PayPage() {
     "function transfer(address to, uint256 amount) returns (bool)",
   ]);
 
+  /*
+    DERIVED
+  */
+  const currentBalance = Number(
+    balance?.formatted ?? "0"
+  );
+
+  const paymentAmount = Number(
+    request?.amount ?? "0"
+  );
+
+  const missingAmount =
+    paymentAmount > currentBalance
+      ? Number(
+          (
+            paymentAmount -
+            currentBalance
+          ).toFixed(6)
+        )
+      : 0;
+
+  const insufficientBalance =
+    !!request &&
+    request.status === "pending" &&
+    missingAmount > 0;
+
+  const paymentLocked =
+    request?.status === "paid" ||
+    request?.status === "expired" ||
+    request?.status === "cancelled";
+
   const isCreator =
     !!address &&
     !!request &&
     address.toLowerCase() ===
       request.creator_wallet.toLowerCase();
 
-  // REALTIME
+  /*
+    REALTIME
+  */
   useEffect(() => {
     if (!id) return;
 
@@ -170,66 +200,77 @@ export default function PayPage() {
     };
   }, [id]);
 
-  // FETCH
+  /*
+    FETCH
+  */
   useEffect(() => {
-    const fetchRequest = async () => {
-      const { data, error } =
-        await supabase
-          .from("payment_requests")
-          .select("*")
-          .eq("id", id)
-          .single();
+    const fetchRequest =
+      async () => {
+        const { data, error } =
+          await supabase
+            .from(
+              "payment_requests"
+            )
+            .select("*")
+            .eq("id", id)
+            .single();
 
-      if (error || !data) {
+        if (error || !data) {
+          setLoading(false);
+
+          return;
+        }
+
+        const isExpired =
+          data.expires_at &&
+          new Date(
+            data.expires_at
+          ).getTime() <
+            Date.now();
+
+        if (
+          isExpired &&
+          data.status ===
+            "pending"
+        ) {
+          await supabase
+            .from(
+              "payment_requests"
+            )
+            .update({
+              status:
+                "expired",
+            })
+            .eq("id", data.id);
+
+          data.status =
+            "expired";
+        }
+
+        setRequest(
+          data as PaymentRequest
+        );
+
         setLoading(false);
-
-        return;
-      }
-
-      const isExpired =
-        data.expires_at &&
-        new Date(
-          data.expires_at
-        ).getTime() < Date.now();
-
-      if (
-        isExpired &&
-        data.status === "pending"
-      ) {
-        await supabase
-          .from("payment_requests")
-          .update({
-            status: "expired",
-          })
-          .eq("id", data.id);
-
-        data.status = "expired";
-      }
-
-      setRequest(
-        data as PaymentRequest
-      );
-
-      // Trigger balance refetch when payment status changes
-      if (data.status !== "pending") {
-        await refetchBalance();
-      }
-
-      setLoading(false);
-    };
+      };
 
     if (id) {
       fetchRequest();
     }
   }, [id]);
 
-  // TIMER
+  /*
+    TIMER
+  */
   useEffect(() => {
-    if (!request?.expires_at) return;
+    if (!request?.expires_at)
+      return;
 
     if (
-      request.status === "paid" ||
-      request.status === "expired" ||
+      request.status ===
+        "paid" ||
+      request.status ===
+        "expired" ||
       request.status ===
         "cancelled"
     ) {
@@ -238,408 +279,325 @@ export default function PayPage() {
       return;
     }
 
-    const interval = setInterval(() => {
-      if (!request.expires_at) return;
+    const interval =
+      setInterval(() => {
+        const expiresAt =
+          new Date(
+            request.expires_at!
+          ).getTime();
 
-      const expiresAt =
-        new Date(
-          request.expires_at
-        ).getTime();
+        const diff =
+          expiresAt -
+          Date.now();
 
-      if (isNaN(expiresAt)) return;
+        if (diff <= 0) {
+          setTimeLeft(
+            "Expired"
+          );
 
-      const diff =
-        expiresAt - Date.now();
+          clearInterval(
+            interval
+          );
 
-      if (diff <= 0) {
-        setTimeLeft("Expired");
+          return;
+        }
 
-        clearInterval(interval);
+        const hours =
+          Math.floor(
+            diff /
+              (1000 *
+                60 *
+                60)
+          );
 
-        return;
-      }
+        const mins =
+          Math.floor(
+            (diff %
+              (1000 *
+                60 *
+                60)) /
+              (1000 *
+                60)
+          );
 
-      const hours = Math.floor(
-        diff / (1000 * 60 * 60)
-      );
+        const secs =
+          Math.floor(
+            (diff %
+              (1000 *
+                60)) /
+              1000
+          );
 
-      const mins = Math.floor(
-        (diff %
-          (1000 * 60 * 60)) /
-          (1000 * 60)
-      );
-
-      const secs = Math.floor(
-        (diff % (1000 * 60)) /
-          1000
-      );
-
-      setTimeLeft(
-        `${hours}h ${mins}m ${secs}s`
-      );
-    }, 1000);
+        setTimeLeft(
+          `${hours}h ${mins}m ${secs}s`
+        );
+      }, 1000);
 
     return () =>
-      clearInterval(interval);
+      clearInterval(
+        interval
+      );
   }, [request]);
 
-  // CANCEL
-  const handleCancel = async () => {
-    if (!request || !address)
-      return;
+  /*
+    BRIDGE REFRESH
+  */
+  const refreshBalanceAfterBridge =
+    useCallback(async () => {
+      setBridging(true);
 
-    try {
-      setCancelling(true);
-
-      if (!isCreator) {
-        toast.error(
-          "Only creator can cancel"
-        );
-
-        return;
-      }
-
-      if (
-        request.status !== "pending"
+      for (
+        let i = 0;
+        i < 6;
+        i++
       ) {
-        toast.error(
-          "Cannot cancel request"
-        );
+        const refreshed =
+          await refetchBalance();
 
-        return;
-      }
+        const nextBalance =
+          Number(
+            refreshed.data
+              ?.formatted ??
+              "0"
+          );
 
-      const { data, error } =
-        await supabase
-          .from("payment_requests")
-          .update({
-            status: "cancelled",
-          })
-          .eq("id", request.id)
-          .eq("status", "pending")
-          .select();
-
-      if (
-        error ||
-        !data ||
-        data.length === 0
-      ) {
-        toast.error(
-          "Failed to cancel"
-        );
-
-        return;
-      }
-
-      setRequest(
-        data[0] as PaymentRequest
-      );
-
-      toast.success(
-        "Payment request cancelled"
-      );
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  // PAY
-  const handlePay = async () => {
-    if (!request) {
-      toast.error(
-        "Payment request not found"
-      );
-
-      return;
-    }
-
-    if (!address || !isConnected) {
-      toast.error(
-        "Connect your wallet first"
-      );
-
-      return;
-    }
-
-    try {
-      setPaying(true);
-
-      const {
-        data: freshRequest,
-      } = await supabase
-        .from("payment_requests")
-        .select("*")
-        .eq("id", request.id)
-        .single();
-
-      if (
-        !freshRequest ||
-        freshRequest.status !==
-          "pending"
-      ) {
-        toast.error(
-          "Payment unavailable"
-        );
-
-        return;
-      }
-
-      if (
-        freshRequest.expires_at &&
-        new Date(
-          freshRequest.expires_at
-        ).getTime() < Date.now()
-      ) {
-        await supabase
-          .from("payment_requests")
-          .update({
-            status: "expired",
-          })
-          .eq("id", freshRequest.id);
-
-        toast.error(
-          "Request expired"
-        );
-
-        return;
-      }
-
-      if (wrongNetwork) {
-        toast.info(
-          "Switching to Arc network..."
-        );
-
-        await switchChainAsync({
-          chainId: ARC_CHAIN_ID,
-        });
-      }
-
-      const userBalance = Number(
-        balance?.formatted ?? "0"
-      );
-
-      const paymentAmount =
-        Number(
-          freshRequest.amount
-        );
-
-      if (
-        Number.isNaN(userBalance)
-      ) {
-        toast.error(
-          "Unable to verify wallet balance"
-        );
-
-        return;
-      }
-
-      if (
-        userBalance <
-        paymentAmount
-      ) {
-        setBridgeOpen(true);
-
-        toast.error(
-          `Insufficient balance. Bridge USDC to continue`
-        );
-
-        return;
-      }
-
-      const {
-        data: lockedRows,
-      } = await supabase
-        .from("payment_requests")
-        .update({
-          status: "processing",
-        })
-        .eq("id", freshRequest.id)
-        .eq("status", "pending")
-        .select();
-
-      if (
-        !lockedRows ||
-        lockedRows.length === 0
-      ) {
-        toast.error(
-          "Payment already processing"
-        );
-
-        return;
-      }
-
-      setRequest({
-        ...freshRequest,
-        status: "processing",
-      });
-
-      const txHash =
-        await writeContractAsync({
-          address:
-            process.env
-              .NEXT_PUBLIC_USDC_CONTRACT as `0x${string}`,
-
-          abi: USDC_ABI,
-
-          functionName:
-            "transfer",
-
-          args: [
-            freshRequest.recipient_wallet as `0x${string}`,
-
-            BigInt(
-              Math.floor(
-                Number(
-                  freshRequest.amount
-                ) * 1_000_000
-              )
-            ),
-          ],
-        });
-
-      toast.success(
-        "Transaction submitted"
-      );
-
-      const receipt =
-        await waitForTransactionReceipt(
-          publicClient,
-          {
-            hash: txHash,
-          }
-        );
-
-      if (
-        !receipt ||
-        receipt.status !==
-          "success"
-      ) {
-        await supabase
-          .from("payment_requests")
-          .update({
-            status: "pending",
-          })
-          .eq("id", freshRequest.id);
-
-        setRequest({
-          ...freshRequest,
-          status: "pending",
-        });
-
-        toast.error(
-          "Transaction failed"
-        );
-
-        return;
-      }
-
-      const paidAt =
-        new Date().toISOString();
-
-      await supabase
-        .from("payment_requests")
-        .update({
-          status: "paid",
-          tx_hash: txHash,
-          paid_by: address,
-          paid_at: paidAt,
-        })
-        .eq("id", freshRequest.id);
-
-      setRequest({
-        ...freshRequest,
-        status: "paid",
-        tx_hash: txHash,
-        paid_by: address,
-        paid_at: paidAt,
-      });
-
-      await refetchBalance();
-
-      toast.success(
-        "Payment completed",
-        {
-          description:
-            shortHash(txHash),
+        if (
+          nextBalance >=
+          paymentAmount
+        ) {
+          break;
         }
-      );
-    } catch (err: unknown) {
-      console.error(err);
 
-      const message =
-        err instanceof Error
-          ? err.message
-          : "";
-
-      if (
-        message
-          .toLowerCase()
-          .includes("rejected")
-      ) {
-        toast.error(
-          "Transaction rejected"
-        );
-      } else {
-        toast.error(
-          message ||
-            "Payment failed"
+        await new Promise(
+          (
+            resolve
+          ) =>
+            setTimeout(
+              resolve,
+              4000
+            )
         );
       }
 
-      if (request?.id) {
+      setBridging(false);
+    }, [
+      paymentAmount,
+      refetchBalance,
+    ]);
+
+  /*
+    CANCEL
+  */
+  const handleCancel =
+    async () => {
+      if (
+        !request ||
+        !address
+      )
+        return;
+
+      try {
+        setCancelling(
+          true
+        );
+
+        const {
+          data,
+        } =
+          await supabase
+            .from(
+              "payment_requests"
+            )
+            .update({
+              status:
+                "cancelled",
+            })
+            .eq(
+              "id",
+              request.id
+            )
+            .eq(
+              "status",
+              "pending"
+            )
+            .select();
+
+        if (
+          !data ||
+          data.length === 0
+        ) {
+          toast.error(
+            "Failed to cancel"
+          );
+
+          return;
+        }
+
+        setRequest(
+          data[0] as PaymentRequest
+        );
+
+        toast.success(
+          "Payment request cancelled"
+        );
+      } finally {
+        setCancelling(
+          false
+        );
+      }
+    };
+
+  /*
+    PAY
+  */
+  const handlePay =
+    async () => {
+      if (!request)
+        return;
+
+      if (
+        !address ||
+        !isConnected
+      ) {
+        toast.error(
+          "Connect wallet first"
+        );
+
+        return;
+      }
+
+      try {
+        setPaying(true);
+
+        if (
+          wrongNetwork
+        ) {
+          toast.info(
+            "Switching to Arc..."
+          );
+
+          await switchChainAsync(
+            {
+              chainId:
+                ARC_CHAIN_ID,
+            }
+          );
+        }
+
+        if (
+          insufficientBalance ||
+          bridging
+        ) {
+          setBridgeOpen(
+            true
+          );
+
+          toast.error(
+            "Insufficient USDC balance"
+          );
+
+          return;
+        }
+
+        const txHash =
+          await writeContractAsync(
+            {
+              address:
+                process.env
+                  .NEXT_PUBLIC_USDC_CONTRACT as `0x${string}`,
+
+              abi: USDC_ABI,
+
+              functionName:
+                "transfer",
+
+              args: [
+                request.recipient_wallet as `0x${string}`,
+
+                BigInt(
+                  Math.round(
+                    paymentAmount *
+                      1_000_000
+                  )
+                ),
+              ],
+            }
+          );
+
+        toast.success(
+          "Transaction submitted"
+        );
+
+        const receipt =
+          await waitForTransactionReceipt(
+            publicClient,
+            {
+              hash:
+                txHash,
+            }
+          );
+
+        if (
+          receipt.status !==
+          "success"
+        ) {
+          toast.error(
+            "Payment failed"
+          );
+
+          return;
+        }
+
         await supabase
-          .from("payment_requests")
+          .from(
+            "payment_requests"
+          )
           .update({
-            status: "pending",
+            status:
+              "paid",
+            tx_hash:
+              txHash,
+            paid_by:
+              address,
+            paid_at:
+              new Date().toISOString(),
           })
-          .eq("id", request.id)
-          .eq("status", "processing");
+          .eq(
+            "id",
+            request.id
+          );
 
         setRequest({
           ...request,
-          status: "pending",
+          status:
+            "paid",
+          tx_hash:
+            txHash,
         });
+
+        toast.success(
+          "Payment completed"
+        );
+
+        await refetchBalance();
+      } catch (err) {
+        console.error(
+          err
+        );
+
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Payment failed"
+        );
+      } finally {
+        setPaying(false);
       }
-    } finally {
-      setPaying(false);
-    }
-  };
+    };
 
-  if (loading) {
-    return (
-      <PageContainer>
-        <div className="flex justify-center py-32">
-          <Loader2 className="h-10 w-10 animate-spin text-fuchsia-400" />
-        </div>
-      </PageContainer>
-    );
-  }
-
-  if (!request) {
-    return (
-      <PageContainer>
-        <GlassCard>
-          <div className="py-10 text-center">
-            Request not found
-          </div>
-        </GlassCard>
-      </PageContainer>
-    );
-  }
-
-  const paymentLocked =
-    request.status === "paid" ||
-    request.status === "expired" ||
-    request.status ===
-      "cancelled";
-
-  const insufficientBalance =
-    request.status === "pending" &&
-    !!balance &&
-    !!request &&
-    Number(balance.formatted) <
-      Number(request.amount);
-
+  /*
+    STATUS MAP
+  */
   const statusMap = {
     pending: {
       icon: Clock3,
@@ -672,20 +630,73 @@ export default function PayPage() {
     },
   };
 
+  /*
+    LOADING
+  */
+  if (loading) {
+    return (
+      <PageContainer>
+        <div className="flex justify-center py-32">
+          <Loader2 className="h-10 w-10 animate-spin text-fuchsia-400" />
+        </div>
+      </PageContainer>
+    );
+  }
+
+  /*
+    NOT FOUND
+  */
+  if (!request) {
+    return (
+      <PageContainer>
+        <GlassCard>
+          <div className="py-10 text-center">
+            Request not found
+          </div>
+        </GlassCard>
+      </PageContainer>
+    );
+  }
+
   const status =
     statusMap[
       request.status as keyof typeof statusMap
     ];
 
   const StatusIcon =
-    status?.icon || Clock3;
+    status?.icon ||
+    Clock3;
 
   return (
     <PageContainer>
       <div className="relative space-y-8">
-        <div className="pointer-events-none absolute -top-20 left-0 h-72 w-72 rounded-full bg-fuchsia-600/20 blur-3xl" />
-
-        <div className="pointer-events-none absolute top-40 right-0 h-72 w-72 rounded-full bg-blue-600/20 blur-3xl" />
+        {/* SMALL FLOATING BRIDGE WIDGET */}
+        {isConnected &&
+          request.status ===
+            "pending" &&
+          insufficientBalance && (
+            <div className="fixed right-4 top-17 z-50 w-[340px]">
+              <BridgeWidget
+                open={
+                  bridgeOpen
+                }
+                onToggle={() =>
+                  setBridgeOpen(
+                    !bridgeOpen
+                  )
+                }
+                amount={
+                  missingAmount
+                }
+                wallet={
+                  address
+                }
+                onBridgeSuccess={async () => {
+                  await refreshBalanceAfterBridge();
+                }}
+              />
+            </div>
+          )}
 
         <GlassCard>
           <div className="space-y-8 text-center">
@@ -709,8 +720,10 @@ export default function PayPage() {
                 Payment Request
               </p>
 
-              <h1 className="text-5xl font-bold tracking-tight sm:text-6xl">
-                {request.amount}
+              <h1 className="text-5xl font-bold">
+                {
+                  request.amount
+                }
 
                 <span className="bg-gradient-to-r from-fuchsia-400 via-purple-400 to-blue-400 bg-clip-text text-transparent">
                   {" "}
@@ -727,7 +740,7 @@ export default function PayPage() {
 
                 <div className="text-left">
                   <p className="text-xs text-white/50">
-                    Recipient Wallet
+                    Recipient
                   </p>
 
                   <p className="font-medium">
@@ -738,18 +751,6 @@ export default function PayPage() {
                 </div>
               </div>
             </div>
-
-            {request.memo && (
-              <div className="mx-auto max-w-2xl rounded-3xl border border-white/10 bg-black/20 p-5 text-left">
-                <p className="mb-2 text-xs text-white/50">
-                  Memo
-                </p>
-
-                <p className="leading-relaxed text-white/80">
-                  {request.memo}
-                </p>
-              </div>
-            )}
 
             {timeLeft && (
               <div className="mx-auto max-w-sm rounded-3xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-5">
@@ -769,55 +770,23 @@ export default function PayPage() {
               </div>
             )}
 
-            {/* BRIDGE WIDGET */}
-            {isConnected &&
-              request.status ===
-                "pending" &&
-              insufficientBalance && (
-                <div className="fixed bottom-4 right-4 z-50 w-72">
-                  <BridgeWidget
-                    open={bridgeOpen}
-                    onToggle={() =>
-                      setBridgeOpen(
-                        !bridgeOpen
-                      )
-                    }
-                    amount={Number(
-                      request.amount
-                    )}
-                    wallet={address}
-                    onBridgeSuccess={() => {
-                      // Trigger balance refresh
-                      triggerBalanceRefresh();
-                      
-                      // Immediately close the bridge widget
-                      setBridgeOpen(false);
-                    }}
-                  />
-                </div>
-              )}
-
-            {/* PAY BUTTON */}
-            <button
-              onClick={handlePay}
+            <PaymentActionButton
+              onClick={
+                handlePay
+              }
               disabled={
                 !isConnected ||
                 paying ||
                 paymentLocked ||
-                insufficientBalance
+                insufficientBalance ||
+                bridging
               }
-              className="w-full rounded-3xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-blue-600 px-6 py-5 text-lg font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {paying ? (
                 <div className="flex items-center justify-center gap-2">
                   <Loader2 className="h-5 w-5 animate-spin" />
-
-                  Processing Payment...
+                  Processing...
                 </div>
-              ) : !isConnected ? (
-                "Connect Wallet"
-              ) : insufficientBalance ? (
-                "Insufficient Balance"
               ) : request.status ===
                 "paid" ? (
                 "Payment Completed"
@@ -827,14 +796,22 @@ export default function PayPage() {
               ) : request.status ===
                 "cancelled" ? (
                 "Request Cancelled"
-              ) : insufficientBalance ? (
-                "Bridge & Pay"
               ) : (
                 "Pay Now"
               )}
-            </button>
+            </PaymentActionButton>
 
-            {/* CANCEL */}
+            {/* {insufficientBalance && (
+              <p className="text-sm text-yellow-300">
+                Insufficient USDC on Arc.
+                Bridge{" "}
+                {missingAmount.toFixed(
+                  2
+                )}{" "}
+                USDC to continue.
+              </p>
+            )} */}
+
             {request.status ===
               "pending" &&
               isCreator && (
@@ -855,10 +832,9 @@ export default function PayPage() {
           </div>
         </GlassCard>
 
-        {/* WALLET */}
         {isConnected && (
           <GlassCard>
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-white/50">
                   Connected Wallet
@@ -881,7 +857,9 @@ export default function PayPage() {
                   <p className="mt-1 text-lg font-semibold">
                     {Number(
                       balance.formatted
-                    ).toFixed(2)}{" "}
+                    ).toFixed(
+                      2
+                    )}{" "}
                     {
                       balance.symbol
                     }
@@ -892,20 +870,17 @@ export default function PayPage() {
           </GlassCard>
         )}
 
-        {/* WRONG NETWORK */}
         {wrongNetwork &&
           isConnected && (
             <GlassCard>
               <div className="flex items-center gap-3 text-yellow-300">
                 <AlertTriangle className="h-5 w-5" />
-
                 Wrong network detected.
                 Please switch to Arc.
               </div>
             </GlassCard>
           )}
 
-        {/* TX HASH */}
         {request.tx_hash && (
           <GlassCard>
             <div className="space-y-4">
@@ -937,13 +912,11 @@ export default function PayPage() {
           </GlassCard>
         )}
 
-        {/* CONNECT */}
         {!isConnected && (
           <GlassCard>
             <div className="space-y-4 text-center">
               <p className="text-white/70">
-                Connect wallet to make
-                payment
+                Connect wallet to continue
               </p>
 
               <div className="flex justify-center">

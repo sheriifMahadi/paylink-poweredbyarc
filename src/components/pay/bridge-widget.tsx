@@ -24,7 +24,8 @@ import {
 type Props = {
   open: boolean;
   onToggle: () => void;
-  amount: number;
+  amount: number; // Total requested amount
+  currentBalance: number; // Current balance on Arc
   wallet?: string;
   onBridgeSuccess?: () => void;
 };
@@ -65,10 +66,17 @@ const chains = [
 export default function BridgeWidget({
   open,
   onToggle,
-  amount,
+  amount, // Total requested amount
+  currentBalance = 0, // Current balance on Arc
   wallet,
   onBridgeSuccess,
 }: Props) {
+  // Calculate bridge amount (amount needed + small buffer for fees)
+  const bridgeAmount = Math.max(
+    Number((amount - currentBalance + 0.1).toFixed(6)), 
+    0
+  );
+
   const [selectedChain, setSelectedChain] =
     useState("Base_Sepolia");
 
@@ -171,7 +179,7 @@ export default function BridgeWidget({
       );
 
       const safeAmount =
-        Number(amount).toFixed(6);
+        Number(bridgeAmount).toFixed(6);
 
       /*
         EXECUTE BRIDGE
@@ -422,7 +430,7 @@ export default function BridgeWidget({
           )}
 
           {/* INFO */}
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          {/* <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
             <p className="text-sm text-white/80">
               Powered by Circle Bridge Kit
             </p>
@@ -431,7 +439,7 @@ export default function BridgeWidget({
               Uses your connected wallet directly.
               No private keys required.
             </p>
-          </div>
+          </div> */}
 
           {/* ACTION */}
           <button
@@ -446,7 +454,7 @@ export default function BridgeWidget({
                 Bridging...
               </div>
             ) : (
-              `Bridge ${amount} USDC`
+              `Bridge ${bridgeAmount.toFixed(6)} USDC`
             )}
           </button>
         </div>
