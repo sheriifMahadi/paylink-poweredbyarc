@@ -147,9 +147,22 @@ export default function PayPage() {
   /*
     DERIVED
   */
-  const currentBalance = Number(
-    balance?.formatted ?? "0"
-  );
+  /*
+    Prevent temporary wagmi undefined balance
+    from resetting to zero during rerenders.
+  */
+  const [stableBalance, setStableBalance] =
+    useState(0);
+
+  useEffect(() => {
+    if (balance?.formatted) {
+      setStableBalance(
+        Number(balance.formatted)
+      );
+    }
+  }, [balance?.formatted]);
+
+  const currentBalance = stableBalance;
 
   const paymentAmount = Number(
     request?.amount ?? "0"

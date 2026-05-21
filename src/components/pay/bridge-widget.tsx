@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   ArrowRightLeft,
@@ -32,9 +32,10 @@ type Props = {
   onToggle: () => void;
 
   /*
-    IMPORTANT:
-    This is already the MISSING amount
-    passed from the page.
+    THIS MUST ALWAYS BE:
+    paymentAmount - currentBalance
+
+    NEVER pass total payment amount.
   */
   amount: number;
 
@@ -52,6 +53,8 @@ type BridgeStatus =
   | "failed";
 
 const kit = new BridgeKit();
+
+const BUFFER = 0.1;
 
 const chains = [
   {
@@ -84,14 +87,33 @@ export default function BridgeWidget({
   onBridgeSuccess,
 }: Props) {
   /*
-    amount is already:
-    paymentAmount - currentBalance
+    CRITICAL FIX:
 
-    We only add a tiny buffer.
+    We memoize the bridge amount from the REAL
+    missing amount coming from parent.
+
+    This prevents stale rerender math bugs.
   */
-  const bridgeAmount = Number(
-    (Math.max(amount, 0) + 0.1).toFixed(6)
-  );
+  const bridgeAmount = useMemo(() => {
+    const safeMissingAmount = Math.max(
+      Number(amount || 0),
+      0
+    );
+
+    /*
+      If already funded,
+      don't add buffer.
+    */
+    if (safeMissingAmount <= 0) {
+      return 0;
+    }
+
+    return Number(
+      (
+        safeMissingAmount + BUFFER
+      ).toFixed(6)
+    );
+  }, [amount]);
 
   const [selectedChain, setSelectedChain] =
     useState("Base_Sepolia");
@@ -123,6 +145,24 @@ export default function BridgeWidget({
       if (!window.ethereum) {
         toast.error(
           "No wallet detected"
+        );
+
+        return;
+      }
+
+      /*
+        EXTRA SAFETY
+
+        Prevent accidental full payment bridge.
+      */
+      if (
+        bridgeAmount <= 0 ||
+        !Number.isFinite(
+          bridgeAmount
+        )
+      ) {
+        toast.error(
+          "No bridge required"
         );
 
         return;
@@ -197,8 +237,21 @@ export default function BridgeWidget({
           }
         );
 
+      /*
+        FINAL SAFE AMOUNT
+      */
       const safeAmount =
         bridgeAmount.toFixed(6);
+
+      console.log(
+        "🌉 Bridging exact missing amount:",
+        {
+          missingAmount:
+            amount,
+          finalBridgeAmount:
+            safeAmount,
+        }
+      );
 
       /*
         EXECUTE BRIDGE
@@ -277,6 +330,11 @@ export default function BridgeWidget({
         "Bridge submitted successfully"
       );
 
+      /*
+        IMPORTANT
+
+        Parent MUST refetch balance here.
+      */
       onBridgeSuccess?.();
     } catch (err) {
       console.error(err);
@@ -358,15 +416,33 @@ export default function BridgeWidget({
         </button>
       </div>
 
-      {/* BALANCE INFO
-      <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
-        <p className="text-xs text-white/50">
-          Amount required on Arc
-        </p>
+      {/* AMOUNT INFO */}
+      {/* <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-white/50">
+              Missing Amount
+            </p>
 
-        <p className="mt-1 text-lg font-semibold text-white">
-          {bridgeAmount.toFixed(2)} USDC
-        </p>
+            <p className="mt-1 text-lg font-semibold text-white">
+              ~
+              {bridgeAmount.toFixed(
+                2
+              )}{" "}
+              USDC
+            </p>
+          </div>
+
+          <div className="text-right">
+            <p className="text-xs text-white/40">
+              Includes buffer
+            </p>
+
+            <p className="text-sm text-yellow-300">
+              +0.10
+            </p>
+          </div>
+        </div>
       </div> */}
 
       {/* CONTENT */}
