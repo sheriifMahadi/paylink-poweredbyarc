@@ -742,18 +742,20 @@ export default function PayPage() {
               request.status ===
                 "pending" &&
               insufficientBalance && (
-                <BridgeWidget
-                  open={bridgeOpen}
-                  onToggle={() =>
-                    setBridgeOpen(
-                      !bridgeOpen
-                    )
-                  }
-                  amount={Number(
-                    request.amount
-                  )}
-                  wallet={address}
-                />
+                <div className="fixed bottom-4 right-4 z-50 w-72">
+                  <BridgeWidget
+                    open={bridgeOpen}
+                    onToggle={() =>
+                      setBridgeOpen(
+                        !bridgeOpen
+                      )
+                    }
+                    amount={Number(
+                      request.amount
+                    )}
+                    wallet={address}
+                  />
+                </div>
               )}
 
             {/* PAY BUTTON */}
